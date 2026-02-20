@@ -79,7 +79,7 @@ def create_trading_journal_agent(language: str = "ko"):
         - "proper_position_sizing", "good_risk_reward"
 
         ## Tool Usage
-        - Use kospi_kosdaq tools to fetch current market data for context
+        - Use the report data for market context
         - Use sqlite to query related past trades if needed
         - Use time tool to get accurate timestamps
 
@@ -172,7 +172,7 @@ def create_trading_journal_agent(language: str = "ko"):
         - "적정비중", "좋은손익비"
 
         ## 도구 사용
-        - kospi_kosdaq 도구로 현재 시장 데이터 조회
+        - 보고서 데이터를 참고하여 시장 데이터 확인
         - sqlite로 관련 과거 거래 조회 가능
         - time 도구로 정확한 시간 확인
 
@@ -221,7 +221,7 @@ def create_trading_journal_agent(language: str = "ko"):
     return Agent(
         name="trading_journal_agent",
         instruction=instruction,
-        server_names=["kospi_kosdaq", "sqlite", "time"]
+        server_names=["sqlite", "time"]
     )
 
 

@@ -3,6 +3,16 @@
 from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file (required before krx_data_client import)
 
+# Share a single KRXDataClient instance between kospi_kosdaq_stock_server and krx_data_client
+# to prevent cross-process session invalidation (KRX allows only one active session per account)
+try:
+    import kospi_kosdaq_stock_server
+    _shared_client = kospi_kosdaq_stock_server._get_krx_client()
+    import krx_data_client as _krx_mod
+    _krx_mod._default_client = _shared_client
+except Exception:
+    pass  # krx_data_client will perform its own initialization
+
 import sys
 import datetime
 import pandas as pd

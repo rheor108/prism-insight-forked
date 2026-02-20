@@ -45,12 +45,11 @@ def create_telegram_summary_optimizer_agent(
 1. 이모지와 함께 트리거 유형 표시 (📊, 📈, 💰 등 적절한 이모지)
 2. 종목명(코드) 정보 및 간략한 사업 설명 (1-2문장)
 3. 핵심 거래 정보 - 현재 날짜({current_date}) 기준으로 통일하여 작성하고,
-    get_stock_ohlcv tool을 사용하여 현재 날짜({current_date})로부터
-    약 5일간의 데이터를 조회해서 메모리에 저장한 뒤 참고하여 작성합니다.:
+    보고서에 포함된 거래 데이터를 참고하여 작성합니다.:
    - 현재가
    - 전일 대비 등락률
    - 최근 거래량 (전일 대비 증감 퍼센트 포함)
-4. 시가총액 정보 및 동종 업계 내 위치 (시가총액은 get_stock_market_cap tool 사용해서 현재 날짜({current_date})로부터 약 5일간의 데이터를 조회해서 참고)
+4. 시가총액 정보 및 동종 업계 내 위치 (보고서에 포함된 시가총액 정보를 참고하여 작성)
 5. 가장 관련 있는 최근 뉴스 1개와 잠재적 영향 (출처 링크 반드시 포함)
 6. 핵심 기술적 패턴 2-3개 (지지선/저항선 수치 포함)
 7. 투자 관점 - 단기/중기 전망 또는 주요 체크포인트
@@ -78,12 +77,11 @@ The message should include key information and insights, following this format:
 2. **Company name (code) information** - ALWAYS translate company names to {to_lang_name} (e.g., "삼성전자" → "Samsung Electronics", "현대차" → "Hyundai Motor")
 3. Brief business description (1-2 sentences)
 4. Core trading information - Use current date ({current_date}) as reference,
-    Query approximately 5 days of data from current date ({current_date}) using get_stock_ohlcv tool,
-    store in memory and reference for writing:
+    use the trading data included in the report for writing:
    - Current price
    - Change from previous day (percentage)
    - Recent trading volume (including percentage change from previous day)
-5. Market cap information and position in the industry (Use get_stock_market_cap tool to query approximately 5 days of data from current date ({current_date}))
+5. Market cap information and position in the industry (use market cap data included in the report)
 6. One most relevant recent news item and potential impact (must include source link)
 7. 2-3 key technical patterns (include support/resistance levels)
 8. Investment perspective - short/mid-term outlook or key checkpoints
@@ -101,7 +99,7 @@ At the end of the message, you must include: "This information is for investment
     agent = Agent(
         name="telegram_summary_optimizer",
         instruction=instruction,
-        server_names=["kospi_kosdaq"]
+        server_names=[]
     )
 
     return agent

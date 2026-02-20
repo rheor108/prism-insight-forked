@@ -42,7 +42,7 @@ def create_trading_scenario_agent(language: str = "ko"):
         ### Risk Management Priority (Cut Losses Short!)
 
         **Step 0: Market Environment Assessment**
-        Check KOSPI last 20 days with kospi_kosdaq-get_index_ohlcv:
+        Check KOSPI data from the report's 'Market Analysis' section:
         - Bull Market: KOSPI above 20-day MA + rose 5%+ in last 2 weeks
         - Bear/Sideways Market: Above conditions not met
 
@@ -221,7 +221,7 @@ def create_trading_scenario_agent(language: str = "ko"):
         **Insufficient Expressions (PROHIBITED):** "overheating concern", "inflection signal", "need more confirmation", "risk uncontrollable"
 
         ## Tool Usage Guide
-        - Volume/investor trading: kospi_kosdaq-get_stock_ohlcv, kospi_kosdaq-get_stock_trading_volume
+        - Volume/investor trading: refer to report's 'Price and Volume Analysis' and 'Investor Trading Trends' sections
         - Valuation comparison: perplexity_ask tool
         - Current time: time-get_current_time tool
         - Data query basis: 'Publication date: ' in report
@@ -334,7 +334,7 @@ def create_trading_scenario_agent(language: str = "ko"):
         ### 리스크 관리 최우선 원칙 (손실은 짧게!)
 
         **0단계: 시장 환경 판단**
-        kospi_kosdaq-get_index_ohlcv로 KOSPI 최근 20일 데이터 확인 후:
+        보고서의 '시장 분석' 섹션에서 KOSPI 데이터 확인 후:
         - 강세장: KOSPI 20일 이동평균선 위 + 최근 2주 +5% 이상 상승
         - 약세장/횡보장: 위 조건 미충족
 
@@ -520,11 +520,10 @@ def create_trading_scenario_agent(language: str = "ko"):
         **불충분한 표현 (사용 금지):** "과열 우려", "변곡 신호", "추가 확인 필요", "리스크 통제 불가"
 
         ## 도구 사용 가이드
-        - 거래량/투자자별 매매: kospi_kosdaq-get_stock_ohlcv, kospi_kosdaq-get_stock_trading_volume
+        - 거래량/투자자별 매매: 보고서의 '1-1. 주가 및 거래량 분석', '1-2. 투자자 거래 동향' 섹션 참고
         - 밸류에이션 비교: perplexity_ask tool
         - 현재 시간: time-get_current_time tool
         - 데이터 조회 기준: 보고서의 'Publication date: ' 날짜
-        - kospi_kosdaq-load_all_tickers 사용 금지!!!
 
         ## JSON 응답 형식
 
@@ -593,7 +592,7 @@ def create_trading_scenario_agent(language: str = "ko"):
     return Agent(
         name="trading_scenario_agent",
         instruction=instruction,
-        server_names=["kospi_kosdaq", "sqlite", "perplexity", "time"]
+        server_names=["sqlite", "perplexity", "time"]
     )
 
 
@@ -630,9 +629,9 @@ def create_sell_decision_agent(language: str = "ko"):
         ### Step 0: Assess Market Environment (Top Priority Analysis)
 
         **Must check first for every decision:**
-        1. Check KOSPI/KOSDAQ recent 20 days data with get_index_ohlcv
+        1. Check KOSPI/KOSDAQ trend from the report's 'Market Analysis' section
         2. Is it rising above 20-day moving average?
-        3. Are foreigners/institutions net buying with get_stock_trading_volume?
+        3. Are foreigners/institutions net buying? (refer to report's investor trading data)
         4. Is individual stock volume above average?
 
         → **Bull market**: 2 or more of above 4 are Yes
@@ -731,10 +730,10 @@ def create_sell_decision_agent(language: str = "ko"):
 
         **time-get_current_time:** Get current time
 
-        **kospi_kosdaq tool to check:**
-        1. get_stock_ohlcv: Analyze trend with recent 14 days price/volume data
-        2. get_stock_trading_volume: Check institutional/foreign trading trends
-        3. get_index_ohlcv: Check KOSPI/KOSDAQ market index info
+        **Report data to check:**
+        1. Price and volume analysis: Analyze trend with recent price/volume data from report
+        2. Investor trading trends: Check institutional/foreign trading trends from report
+        3. Market analysis: Check KOSPI/KOSDAQ market index info from report
 
         **sqlite tool to check:**
         1. Current portfolio overall status
@@ -798,9 +797,9 @@ def create_sell_decision_agent(language: str = "ko"):
         ### 0단계: 시장 환경 파악 (최우선 분석)
 
         **매 판단 시 반드시 먼저 확인:**
-        1. get_index_ohlcv로 KOSPI/KOSDAQ 최근 20일 데이터 확인
+        1. 보고서의 '시장 분석' 섹션에서 KOSPI/KOSDAQ 최근 추세 확인
         2. 20일 이동평균선 위에서 상승 중인가?
-        3. get_stock_trading_volume으로 외국인/기관 순매수 중인가?
+        3. 보고서의 투자자 거래 동향에서 외국인/기관 순매수 중인가?
         4. 개별 종목 거래량이 평균 이상인가?
 
         → **강세장 판단**: 위 4개 중 2개 이상 Yes
@@ -899,11 +898,10 @@ def create_sell_decision_agent(language: str = "ko"):
 
         **time-get_current_time:** 현재 시간 획득
 
-        **kospi_kosdaq tool로 확인:**
-        1. get_stock_ohlcv: 최근 14일 가격/거래량 데이터로 추세 분석
-        2. get_stock_trading_volume: 기관/외국인 매매 동향 확인
-        3. get_index_ohlcv: 코스피/코스닥 시장 지수 정보 확인
-        4. load_all_tickers 사용 금지!!!
+        **보고서 데이터로 확인:**
+        1. 주가 및 거래량 분석: 보고서의 최근 가격/거래량 데이터로 추세 분석
+        2. 투자자 거래 동향: 보고서의 기관/외국인 매매 동향 확인
+        3. 시장 분석: 보고서의 코스피/코스닥 시장 지수 정보 확인
 
         **sqlite tool로 확인:**
         1. 현재 포트폴리오 전체 현황 (stock_holdings 테이블 참고)
@@ -952,5 +950,5 @@ def create_sell_decision_agent(language: str = "ko"):
     return Agent(
         name="sell_decision_agent",
         instruction=instruction,
-        server_names=["kospi_kosdaq", "sqlite", "time"]
+        server_names=["sqlite", "time"]
     )

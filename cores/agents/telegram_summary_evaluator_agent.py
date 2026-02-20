@@ -36,8 +36,8 @@ def create_telegram_summary_evaluator_agent(
 주식 분석 보고서와 생성된 텔레그램 메시지를 비교하여 다음 기준에 따라 평가해야 합니다:
 
 1. 정확성: 메시지가 보고서의 사실을 정확하게 반영하는가? 할루시네이션이나 오류가 없는가?
-(이 때, 거래 정보 검증은 get_stock_ohlcv tool을 사용하여 현재 날짜({current_date})로부터 약 5일간의 데이터를 조회해서 검증 진행함.)
-또한, 시가총액은 get_stock_market_cap tool을 사용해서 마찬가지로 현재 날짜({current_date})로부터 약 5일간의 데이터를 조회해서 검증 진행.)
+(보고서에 포함된 거래 데이터를 기준으로 검증 진행.
+시가총액은 보고서에 포함된 시가총액 데이터를 기준으로 검증 진행.)
 
 2. 포맷 준수: 지정된 형식(이모지, 종목 정보, 거래 정보 등)을 올바르게 따르고 있는가?
 3. 명확성: 정보가 명확하고 이해하기 쉽게 전달되는가?
@@ -73,8 +73,8 @@ def create_telegram_summary_evaluator_agent(
 Compare the stock analysis report with the generated telegram message and evaluate based on the following criteria:
 
 1. Accuracy: Does the message accurately reflect the facts in the report? Are there any hallucinations or errors?
-(For trading information verification, use get_stock_ohlcv tool to query approximately 5 days of data from current date ({current_date}).
-For market cap verification, use get_stock_market_cap tool to query approximately 5 days of data from current date ({current_date}).)
+(For trading information verification, use the trading data included in the report.
+For market cap verification, use the market cap data included in the report.)
 
 2. Format Compliance: Does it correctly follow the specified format (emojis, stock information, trading information, etc.)?
 3. Clarity: Is the information clearly and easily communicated?
@@ -110,7 +110,7 @@ Provide the final evaluation in the following structure:
     agent = Agent(
         name="telegram_summary_evaluator",
         instruction=instruction,
-        server_names=["kospi_kosdaq"]
+        server_names=[]
     )
 
     return agent
