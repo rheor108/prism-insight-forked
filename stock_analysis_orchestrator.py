@@ -512,7 +512,6 @@ class StockAnalysisOrchestrator:
                         logger.info(f"Translating telegram message to {lang}")
                         translated_message = await translate_telegram_message(
                             original_message,
-                            model="gpt-5-nano",
                             from_lang="ko",
                             to_lang=lang
                         )
@@ -565,7 +564,6 @@ class StockAnalysisOrchestrator:
 
                         translated_report = await translate_telegram_message(
                             text_for_translation,
-                            model="gpt-5-nano",
                             from_lang="ko",
                             to_lang=lang
                         )
@@ -660,7 +658,7 @@ class StockAnalysisOrchestrator:
                 try:
                     logger.info("Translating trigger alert message to English")
                     from cores.agents.telegram_translator_agent import translate_telegram_message
-                    message = await translate_telegram_message(message, model="gpt-5-nano")
+                    message = await translate_telegram_message(message)
                     logger.info("Translation complete")
                 except Exception as e:
                     logger.error(f"Translation failed: {str(e)}. Using original Korean message.")
@@ -719,7 +717,6 @@ class StockAnalysisOrchestrator:
                     logger.info(f"Translating trigger alert to {lang}")
                     translated_message = await translate_telegram_message(
                         original_message,
-                        model="gpt-5-nano",
                         from_lang="ko",
                         to_lang=lang
                     )

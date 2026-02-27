@@ -118,8 +118,8 @@ async def analyze_stock(company_code: str = "000660", company_name: str = "SK하
 
         # 6. Execute base analysis
         # Parallel processing option: Activated when PRISM_PARALLEL_REPORT=true is set in .env file
-        # ⚠️ Warning: Parallel processing greatly improves speed but may hit OpenAI API rate limits.
-        # When using advanced models like GPT-5.2, rate limits may be stricter, so be careful.
+        # ⚠️ Warning: Parallel processing greatly improves speed but may hit API rate limits.
+        # When using advanced models, rate limits may be stricter, so be careful.
         parallel_enabled = os.getenv("PRISM_PARALLEL_REPORT", "false").lower() == "true"
 
         if parallel_enabled:

@@ -109,7 +109,7 @@ class TelegramSender:
             translated = []
             for idx, message in enumerate(messages, 1):
                 logger.info(f"Translating message {idx}/{len(messages)}")
-                result = await translate_telegram_message(message, model="gpt-5-nano")
+                result = await translate_telegram_message(message)
                 translated.append(result)
             logger.info("All messages translated successfully")
             return translated
@@ -140,7 +140,7 @@ class TelegramSender:
                     for message in messages:
                         try:
                             translated = await translate_telegram_message(
-                                message, model="gpt-5-nano",
+                                message,
                                 from_lang="ko", to_lang=lang
                             )
                             await self._send_single_message(channel_id, translated)

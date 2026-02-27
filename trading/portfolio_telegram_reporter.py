@@ -419,7 +419,6 @@ class PortfolioTelegramReporter:
                     # Translate message
                     translated_message = await translate_telegram_message(
                         original_message,
-                        model="gpt-5-nano",
                         from_lang="ko",
                         to_lang=lang
                     )

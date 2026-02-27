@@ -235,7 +235,7 @@ class TelegramSummaryGenerator:
             if emoji_start and message_end:
                 return cleaned_response[emoji_start.start():message_end.end()]
 
-        # If OpenAI API response object (has content attribute)
+        # If API response object (has content attribute)
         if hasattr(response, 'content') and response.content is not None:
             logger.info("Response has content attribute.")
             return response.content

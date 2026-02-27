@@ -104,7 +104,7 @@ class USDashboardDataGenerator:
         # Initialize translator
         if self.enable_translation:
             try:
-                self.translator = DashboardTranslator(model="gpt-5-nano")
+                self.translator = DashboardTranslator()
                 logger.info("Translation feature enabled.")
             except Exception as e:
                 self.enable_translation = False
@@ -1255,7 +1255,7 @@ class USDashboardDataGenerator:
             operating_costs = {
                 'month': '2026-01',
                 'server_hosting': 31.68,
-                'openai_api': 234.15,
+                'claude_api': 0.0,
                 'anthropic_api': 11.4,
                 'firecrawl_api': 19,
                 'perplexity_api': 16.5

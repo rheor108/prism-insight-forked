@@ -96,7 +96,6 @@ Only return the translated text without any explanations or metadata.
 
 async def translate_telegram_message(
     message: str,
-    model: str = "haiku",
     from_lang: str = "ko",
     to_lang: str = "en"
 ) -> str:
@@ -105,7 +104,6 @@ async def translate_telegram_message(
 
     Args:
         message: Telegram message to translate
-        model: Ignored (kept for backward compatibility). Uses Claude Haiku via claude -p.
         from_lang: Source language code (default: "ko" for Korean)
         to_lang: Target language code (default: "en" for English)
 

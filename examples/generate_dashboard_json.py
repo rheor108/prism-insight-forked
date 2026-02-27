@@ -96,7 +96,7 @@ class DashboardDataGenerator:
         # Initialize translator
         if self.enable_translation:
             try:
-                self.translator = DashboardTranslator(model="gpt-5-nano")
+                self.translator = DashboardTranslator()
                 logger.info("Translation enabled.")
             except Exception as e:
                 self.enable_translation = False
@@ -587,7 +587,7 @@ class DashboardDataGenerator:
         # 2026년 1월 기준 운영 비용
         return {
             'server_hosting': 31.68,
-            'openai_api': 234.15,
+            'claude_api': 0.0,
             'anthropic_api': 11.4,
             'firecrawl_api': 19.0,
             'perplexity_api': 16.5,

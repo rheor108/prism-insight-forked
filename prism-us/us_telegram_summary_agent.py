@@ -485,7 +485,7 @@ Report Content:
             if emoji_start and message_end:
                 return cleaned_response[emoji_start.start():message_end.end()]
 
-        # Handle OpenAI API response object
+        # Handle API response object
         if hasattr(response, 'content') and response.content is not None:
             logger.info("Response has content attribute")
             return response.content
