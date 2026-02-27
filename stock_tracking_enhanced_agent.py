@@ -11,8 +11,7 @@ import json
 import traceback
 import re
 
-from mcp_agent.workflows.llm.augmented_llm import RequestParams
-from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
+from cores.claude_llm_adapter import ClaudeCodeLLM
 
 # Import core agents
 from cores.agents.trading_agents import create_sell_decision_agent
@@ -139,18 +138,26 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
     async def _analyze_simple_market_condition(self):
         """Analyze market condition (bull/bear market)"""
         try:
-            from krx_data_client import get_index_ohlcv_by_date
             import datetime as dt
 
-            # Today's date
-            today = dt.datetime.now().strftime("%Y%m%d")
+            # Use pre-fetched market data if available (avoids KRX session conflict)
+            prefetched_market = getattr(self, '_prefetched_market_data', None)
+            if prefetched_market and "kospi" in prefetched_market and "kosdaq" in prefetched_market:
+                kospi_df = prefetched_market["kospi"]
+                kosdaq_df = prefetched_market["kosdaq"]
+                logger.info("Using pre-fetched KOSPI/KOSDAQ data for market condition analysis")
+            else:
+                from krx_data_client import get_index_ohlcv_by_date
 
-            # One month ago
-            one_month_ago = (dt.datetime.now() - dt.timedelta(days=30)).strftime("%Y%m%d")
+                # Today's date
+                today = dt.datetime.now().strftime("%Y%m%d")
 
-            # Get KOSPI and KOSDAQ index data
-            kospi_df = get_index_ohlcv_by_date(one_month_ago, today, "1001")
-            kosdaq_df = get_index_ohlcv_by_date(one_month_ago, today, "2001")
+                # One month ago
+                one_month_ago = (dt.datetime.now() - dt.timedelta(days=30)).strftime("%Y%m%d")
+
+                # Get KOSPI and KOSDAQ index data
+                kospi_df = get_index_ohlcv_by_date(one_month_ago, today, "1001")
+                kosdaq_df = get_index_ohlcv_by_date(one_month_ago, today, "2001")
 
             # Analyze index trends
             kospi_trend = self._calculate_trend(kospi_df['Close'])
@@ -262,14 +269,23 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             if ticker in self.volatility_table:
                 return self.volatility_table[ticker]
 
-            # Fetch 60 days of price data
-            today = datetime.now()
-            start_date = (today - timedelta(days=60)).strftime("%Y%m%d")
-            end_date = today.strftime("%Y%m%d")
+            # Use pre-fetched per-stock OHLCV if available (avoids KRX session conflict)
+            per_stock_cache = getattr(self, '_prefetched_per_stock_ohlcv', None)
+            if per_stock_cache and ticker in per_stock_cache:
+                df = per_stock_cache[ticker]
+                # Use last 60 days from the cached data
+                df = df.tail(60)
+                logger.info(f"Using pre-fetched OHLCV for {ticker} volatility calculation ({len(df)} rows)")
+            else:
+                # Fallback to direct KRX call (may cause session conflict)
+                logger.warning(f"per_stock_ohlcv cache miss for {ticker} - falling back to direct KRX call (may cause session conflict)")
+                # Fetch 60 days of price data
+                today = datetime.now()
+                start_date = (today - timedelta(days=60)).strftime("%Y%m%d")
+                end_date = today.strftime("%Y%m%d")
 
-            # Fetch stock price data using krx_data_client
-            from krx_data_client import get_market_ohlcv_by_date
-            df = get_market_ohlcv_by_date(start_date, end_date, ticker)
+                from krx_data_client import get_market_ohlcv_by_date
+                df = get_market_ohlcv_by_date(start_date, end_date, ticker)
 
             if df.empty:
                 logger.warning(f"{ticker} Cannot fetch price data - using default volatility")
@@ -691,13 +707,20 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
     async def _analyze_trend(self, ticker, days=14):
         """Analyze stock's short-term trend"""
         try:
-            # Fetch data
-            today = datetime.now()
-            start_date = (today - timedelta(days=days)).strftime("%Y%m%d")
-            end_date = today.strftime("%Y%m%d")
+            # Use pre-fetched per-stock OHLCV if available (avoids KRX session conflict)
+            per_stock_cache = getattr(self, '_prefetched_per_stock_ohlcv', None)
+            if per_stock_cache and ticker in per_stock_cache:
+                df = per_stock_cache[ticker].tail(days)
+                logger.info(f"Using pre-fetched OHLCV for {ticker} trend analysis ({len(df)} rows)")
+            else:
+                # Fallback to direct KRX call (may cause session conflict)
+                logger.warning(f"per_stock_ohlcv cache miss for {ticker} - falling back to direct KRX call (may cause session conflict)")
+                today = datetime.now()
+                start_date = (today - timedelta(days=days)).strftime("%Y%m%d")
+                end_date = today.strftime("%Y%m%d")
 
-            from krx_data_client import get_market_ohlcv_by_date
-            df = get_market_ohlcv_by_date(start_date, end_date, ticker)
+                from krx_data_client import get_market_ohlcv_by_date
+                df = get_market_ohlcv_by_date(start_date, end_date, ticker)
 
             if df.empty:
                 return 0  # Neutral (no data)
@@ -805,7 +828,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             logger.info(f"  - Investment periods: {json.dumps(investment_periods, ensure_ascii=False)}")
 
             # LLM call to generate sell decision
-            llm = await self.sell_decision_agent.attach_llm(OpenAIAugmentedLLM)
+            llm = ClaudeCodeLLM(instruction=self.sell_decision_agent.instruction, server_names=getattr(self.sell_decision_agent, 'server_names', []))
 
             # Prepare prompt based on language (Korean text preserved for language == "ko" blocks)
             if self.language == "ko":
@@ -860,11 +883,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 """
 
             response = await llm.generate_str(
-                message=prompt_message,
-                request_params=RequestParams(
-                    model="gpt-5.2",
-                    maxTokens=16000
-                )
+                message=prompt_message
             )
 
             # JSON parsing

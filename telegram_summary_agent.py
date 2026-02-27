@@ -6,14 +6,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from mcp_agent.agents.agent import Agent
-from mcp_agent.app import MCPApp
-from mcp_agent.workflows.llm.augmented_llm import RequestParams
-from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
-from mcp_agent.workflows.evaluator_optimizer.evaluator_optimizer import (
-    EvaluatorOptimizerLLM,
-    QualityRating,
-)
+from cores.claude_llm_adapter import ClaudeCodeLLM
 
 # Logging setup
 logging.basicConfig(
@@ -22,8 +15,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Create MCPApp instance
-app = MCPApp(name="telegram_summary")
 
 class TelegramSummaryGenerator:
     """
@@ -83,6 +74,7 @@ class TelegramSummaryGenerator:
         2. If both exist, prioritize afternoon (most recent data)
         3. If only one exists, select that mode
         4. If neither exists, return default value
+
 
         This considers the daily schedule execution order (morning → afternoon)
         to utilize the most recent market data.
@@ -201,19 +193,11 @@ class TelegramSummaryGenerator:
         # Set current date (YYYY.MM.DD format)
         current_date = datetime.now().strftime("%Y.%m.%d")
 
-        # Create optimizer agent
+        # Get optimizer agent instruction for system prompt
         optimizer = self.create_optimizer_agent(metadata, current_date, from_lang, to_lang)
 
-        # Create evaluator agent
-        evaluator = self.create_evaluator_agent(current_date, from_lang, to_lang)
-
-        # Configure evaluation-optimization workflow
-        evaluator_optimizer = EvaluatorOptimizerLLM(
-            optimizer=optimizer,
-            evaluator=evaluator,
-            llm_factory=OpenAIAugmentedLLM,
-            min_rating=QualityRating.EXCELLENT
-        )
+        # Use ClaudeCodeLLM (Claude Opus is capable enough without evaluator-optimizer loop)
+        llm = ClaudeCodeLLM(instruction=optimizer.instruction)
 
         # Construct message prompt
         prompt_message = f"""다음은 {metadata['stock_name']}({metadata['stock_code']}) 종목에 대한 상세 분석 보고서입니다.
@@ -228,16 +212,8 @@ class TelegramSummaryGenerator:
             logger.info("Adding warning message for 10-minute post-market-open data")
             prompt_message += "\n⚠️ 주의: 본 정보는 장 시작 후 10분 시점 데이터입니다. 현재 상황과 다를 수 있습니다."
 
-        # Generate Telegram message using evaluation-optimization workflow
-        response = await evaluator_optimizer.generate_str(
-            message=prompt_message,
-            request_params=RequestParams(
-                model="gpt-5.2",
-                reasoning_effort="none",
-                maxTokens=6000,
-                max_iterations=2
-            )
-        )
+        # Generate Telegram message using Claude
+        response = await llm.generate_str(message=prompt_message)
 
         # Process response - improved method
         logger.info(f"Response type: {type(response)}")
@@ -431,9 +407,7 @@ async def main():
 
     args = parser.parse_args()
 
-    async with app.run() as parallel_app:
-        logger = parallel_app.logger
-
+    if True:
         # Process specific report only
         if args.report:
             report_pdf_path = args.report

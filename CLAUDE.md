@@ -1,14 +1,15 @@
 # CLAUDE.md - AI Assistant Guide for PRISM-INSIGHT
 
-> **Version**: 2.4.7 | **Updated**: 2026-02-16
+> **Version**: 2.5.0 | **Updated**: 2026-02-27
 
 ## Quick Overview
 
 **PRISM-INSIGHT** = AI-powered Korean/US stock analysis & automated trading system
 
 ```yaml
-Stack: Python 3.10+, mcp-agent, GPT-5/Claude 4.5, SQLite, Telegram, KIS API
+Stack: Python 3.10+, Claude Code (claude -p), Claude Opus 4.6/Haiku 4.5, SQLite, Telegram, KIS API
 Scale: ~70 files, 16,000+ LOC, 13+ AI agents, KR/US dual market support
+LLM: All calls via `claude -p` subprocess (Claude Code Max Plan, $0 API cost)
 ```
 
 ## Project Structure
@@ -18,7 +19,9 @@ prism-insight/
 ├── cores/                    # AI Analysis Engine
 │   ├── agents/              # 13 specialized AI agents
 │   ├── analysis.py          # Core orchestration
-│   └── report_generation.py # Report templates
+│   ├── report_generation.py # Report templates
+│   ├── claude_llm_bridge.py # claude -p subprocess wrapper
+│   └── claude_llm_adapter.py # Drop-in LLM adapter (ClaudeCodeLLM)
 ├── trading/                  # KIS API Trading (KR)
 ├── prism-us/                # US Stock Module (mirror of KR)
 │   ├── cores/agents/        # US-specific agents
@@ -85,13 +88,27 @@ All Korean (ko) report sections must use formal polite style (합쇼체):
 ```
 Rule is enforced in `cores/report_generation.py` (common prompts) and each agent's instruction.
 
+### LLM Architecture (v2.5.0)
+All LLM calls use `claude -p` subprocess via `ClaudeCodeLLM` adapter:
+```python
+from cores.claude_llm_adapter import ClaudeCodeLLM
+
+# Heavy analysis (claude-opus-4-6)
+llm = ClaudeCodeLLM(instruction=agent.instruction)
+result = await llm.generate_str(message=prompt)
+
+# Lightweight translation (claude-haiku-4-5)
+llm = ClaudeCodeLLM(instruction=instruction, default_model="haiku", max_turns=1)
+result = await llm.generate_str(message=text)
+```
+
 ### Sequential Agent Execution
 ```python
-# ✅ Correct - respects rate limits
+# ✅ Correct - sequential for stability
 for section in sections:
     report = await generate_report(agent, section)
 
-# ❌ Wrong - hits rate limits
+# ⚠️ Parallel mode available via PRISM_PARALLEL_REPORT=true in .env
 reports = await asyncio.gather(*[generate_report(a, s) for s in sections])
 ```
 
@@ -198,6 +215,7 @@ For comprehensive guides, see:
 
 | Ver | Date | Changes |
 |-----|------|---------|
+| 2.5.0 | 2026-02-27 | **GPT→Claude Code 전면 마이그레이션** - 모든 LLM 호출을 `claude -p` subprocess로 전환 (Max Plan 크레딧, $0 API 비용), `cores/claude_llm_bridge.py` + `cores/claude_llm_adapter.py` 신규 (ClaudeCodeLLM drop-in adapter), KR 14개 파일 + US 4개 파일 OpenAIAugmentedLLM→ClaudeCodeLLM 교체, gpt-5.2→claude-opus-4-6, gpt-5-nano/gpt-4o-mini→claude-haiku-4-5, EvaluatorOptimizerLLM→단일 ClaudeCodeLLM (Opus 성능으로 충분), MCPApp 컨텍스트 제거 (analysis.py), `.mcp.json` 생성 (Claude Code MCP 서버 설정), `.claude/commands/` 슬래시 커맨드 4종 (analyze-kr, analyze-us, portfolio, weekly-report), Docker: Claude Code CLI 설치 + `~/.claude` 볼륨 마운트, crontab: `claude -p` 기반 스케줄링, `prompts/` 디렉토리 (cron 실행용 프롬프트), `events/jeoningu_trading.py` 삭제 (Whisper STT + OpenAI SDK) |
 | 2.4.7 | 2026-02-16 | **주간 리포트 확장 + 압축 후행평가** - 주간 매매 요약 섹션 (매수 수익률, 매도 실적), 매도 후 평가 (현재가 비교 → 잘 팔았다/더 기다릴 수 있었다), AI 장기 학습 인사이트 (trading_intuitions 반영), L1→L2 압축 시 현재가 비교 후행 교훈 자동 생성 (KR: pykrx, US: yfinance), 주간 리포트 `--broadcast-languages` 다국어 broadcast 지원, `/triggers` 참조 제거 |
 | 2.4.6 | 2026-02-12 | **US 트레이딩 에이전트 신호 체계 정비** - language 기본값 `"en"`→`"ko"` 통일 (prism-us 전체 11파일), KO↔EN 프롬프트 동기화 (진입 기준 완화, 점수 정의 등 6항목), 미국 시장에 맞지 않는 기관 수급/13F 신호 제거, Form 4 내부자 신호 제거 (perplexity 웹검색 비신뢰), 애널리스트 투자의견 제거 (후행 지표+sell-side 편향), 모든 매매 신호를 yahoo_finance 가격/거래량 기반으로 통일 (O'Neil CAN SLIM 원칙) |
 | 2.4.5 | 2026-02-11 | **Firebase notify 논블로킹 + Broadcast-Tracking 동시 실행** - Firebase `_notify_firebase()` 인라인 `await` → `_schedule_firebase()` 태스크로 변경 후 메서드 끝에서 `asyncio.gather()` 수거 (Telegram 전송 블로킹 제거), 오케스트레이터 step 5-1 제거 (broadcast 완료 대기 → tracking 즉시 시작, broadcast는 async I/O로 동시 실행), `finally` 블록이 broadcast 완료 보장 (KR/US 공통) |

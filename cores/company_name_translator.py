@@ -70,11 +70,9 @@ async def translate_company_name(korean_name: str) -> str:
         return _translation_cache[korean_name]
 
     try:
-        from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
-        from mcp_agent.workflows.llm.augmented_llm import RequestParams
-        from mcp_agent.agents.agent import Agent
+        from cores.claude_llm_adapter import ClaudeCodeLLM
 
-        # Create a simple translation agent
+        # Create a simple translation agent instruction
         instruction = """You are a Korean-to-English translator for company names.
 
 Your task is to translate Korean company names to their official English names.
@@ -102,25 +100,12 @@ Return ONLY the English company name, nothing else. No quotes, no explanation.
 - 기아 → Kia
 """
 
-        agent = Agent(
-            name="company_name_translator",
-            instruction=instruction,
-            server_names=[]
-        )
-
-        # Attach LLM
-        llm = await agent.attach_llm(OpenAIAugmentedLLM)
+        # Use haiku for cost-efficient company name translation
+        llm = ClaudeCodeLLM(instruction=instruction, default_model="haiku", max_turns=1)
 
         # Generate translation
-        # Using gpt-4o-mini: non-reasoning model, 350x cheaper & 14x faster than gpt-5-mini
         english_name = await llm.generate_str(
-            message=f"Translate this Korean company name to English: {korean_name}",
-            request_params=RequestParams(
-                model="gpt-4o-mini",
-                maxTokens=100,
-                temperature=0.1,
-                max_iterations=1
-            )
+            message=f"Translate this Korean company name to English: {korean_name}"
         )
 
         # Clean and sanitize the result

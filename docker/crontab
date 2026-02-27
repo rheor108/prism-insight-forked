@@ -5,7 +5,7 @@
 
 # Environment variables
 SHELL=/bin/bash
-PATH=/app/venv/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PATH=/app/venv/bin:/root/.local/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 PYTHONPATH=/app/prism-insight
 
 # -----------------------------------------------------------------------------
@@ -25,20 +25,21 @@ PYTHONPATH=/app/prism-insight
 # Stock data update at 07:00 KST (Mon-Fri)
 0 7 * * 1-5 cd /app/prism-insight && python3 update_stock_data.py >> /app/prism-insight/logs/stock_update_$(date +\%Y\%m\%d).log 2>&1
 
-# KR Morning batch at 09:30 KST (Mon-Fri)
-30 9 * * 1-5 cd /app/prism-insight && python3 stock_analysis_orchestrator.py --mode morning >> /app/prism-insight/logs/kr_morning_$(date +\%Y\%m\%d).log 2>&1
+# KR Morning batch at 09:30 KST (Mon-Fri) - claude -p via Max Plan
+30 9 * * 1-5 cd /app/prism-insight && claude -p "$(cat prompts/kr_morning.md)" --model opus --output-format text --max-turns 20 >> /app/prism-insight/logs/kr_morning_$(date +\%Y\%m\%d).log 2>&1
 
-# KR Afternoon batch at 15:40 KST (Mon-Fri)
-40 15 * * 1-5 cd /app/prism-insight && python3 stock_analysis_orchestrator.py --mode afternoon >> /app/prism-insight/logs/kr_afternoon_$(date +\%Y\%m\%d).log 2>&1
+# KR Afternoon batch at 15:40 KST (Mon-Fri) - claude -p via Max Plan
+40 15 * * 1-5 cd /app/prism-insight && claude -p "$(cat prompts/kr_afternoon.md)" --model opus --output-format text --max-turns 20 >> /app/prism-insight/logs/kr_afternoon_$(date +\%Y\%m\%d).log 2>&1
 
 # Dashboard refresh at 11:05 KST (Mon-Fri)
 5 11 * * 1-5 cd /app/prism-insight && python3 examples/generate_dashboard_json.py >> /app/prism-insight/logs/dashboard.log 2>&1
 
-# Performance tracker at 17:00 KST (Mon-Fri)
-0 17 * * 1-5 cd /app/prism-insight && python3 performance_tracker_batch.py >> /app/prism-insight/logs/performance.log 2>&1
+# Performance tracker at 17:45 KST (Mon-Fri)
+# Delayed from 17:00 to avoid KRX session conflict with afternoon pipeline tracking (~17:35)
+45 17 * * 1-5 cd /app/prism-insight && python3 performance_tracker_batch.py >> /app/prism-insight/logs/performance.log 2>&1
 
-# Dashboard refresh at 17:10 KST (Mon-Fri)
-10 17 * * 1-5 cd /app/prism-insight && python3 examples/generate_dashboard_json.py >> /app/prism-insight/logs/dashboard.log 2>&1
+# Dashboard refresh at 17:55 KST (Mon-Fri)
+55 17 * * 1-5 cd /app/prism-insight && python3 examples/generate_dashboard_json.py >> /app/prism-insight/logs/dashboard.log 2>&1
 
 # -----------------------------------------------------------------------------
 # US Stock Market (American Stock)
@@ -47,14 +48,22 @@ PYTHONPATH=/app/prism-insight
 # Yahoo Finance data delay: 15-20 min (schedule adjusted accordingly)
 # -----------------------------------------------------------------------------
 
-# US Morning batch at 00:15 KST (10:15 EST) - Tue-Sat (Mon-Fri US)
-15 0 * * 2-6 cd /app/prism-insight && python3 prism-us/us_stock_analysis_orchestrator.py --mode morning >> /app/prism-insight/logs/us_morning_$(date +\%Y\%m\%d).log 2>&1
+# US Morning batch at 00:15 KST (10:15 EST) - Tue-Sat (Mon-Fri US) - claude -p via Max Plan
+15 0 * * 2-6 cd /app/prism-insight && claude -p "$(cat prompts/us_morning.md)" --model opus --output-format text --max-turns 20 >> /app/prism-insight/logs/us_morning_$(date +\%Y\%m\%d).log 2>&1
+
+# US Dashboard refresh at 01:00 KST (11:00 EST) - after morning batch
+0 1 * * 2-6 cd /app/prism-insight && python3 examples/generate_us_dashboard_json.py >> /app/prism-insight/logs/us_dashboard.log 2>&1
 
 # US Midday batch at 02:30 KST (12:30 EST) - Tue-Sat (Mon-Fri US)
 30 2 * * 2-6 cd /app/prism-insight && python3 prism-us/us_stock_analysis_orchestrator.py --mode midday >> /app/prism-insight/logs/us_midday_$(date +\%Y\%m\%d).log 2>&1
 
+
+# US Dashboard refresh at 03:15 KST (13:15 EST) - after midday batch
+15 3 * * 2-6 cd /app/prism-insight && python3 examples/generate_us_dashboard_json.py >> /app/prism-insight/logs/us_dashboard.log 2>&1
+
 # US Afternoon batch at 06:30 KST (16:30 EST) - Tue-Sat (Mon-Fri US)
 30 6 * * 2-6 cd /app/prism-insight && python3 prism-us/us_stock_analysis_orchestrator.py --mode afternoon >> /app/prism-insight/logs/us_afternoon_$(date +\%Y\%m\%d).log 2>&1
+
 
 # US Performance tracker at 07:30 KST (17:30 EST) - Tue-Sat (Mon-Fri US)
 30 7 * * 2-6 cd /app/prism-insight && python3 prism-us/us_performance_tracker_batch.py >> /app/prism-insight/logs/us_performance_$(date +\%Y\%m\%d).log 2>&1

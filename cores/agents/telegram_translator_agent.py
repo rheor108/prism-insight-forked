@@ -96,7 +96,7 @@ Only return the translated text without any explanations or metadata.
 
 async def translate_telegram_message(
     message: str,
-    model: str = "gpt-5-nano",
+    model: str = "haiku",
     from_lang: str = "ko",
     to_lang: str = "en"
 ) -> str:
@@ -105,33 +105,24 @@ async def translate_telegram_message(
 
     Args:
         message: Telegram message to translate
-        model: OpenAI model to use (default: gpt-5-nano for cost efficiency)
+        model: Ignored (kept for backward compatibility). Uses Claude Haiku via claude -p.
         from_lang: Source language code (default: "ko" for Korean)
         to_lang: Target language code (default: "en" for English)
 
     Returns:
         str: Translated message
     """
-    from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
-    from mcp_agent.workflows.llm.augmented_llm import RequestParams
+    from cores.claude_llm_adapter import ClaudeCodeLLM
 
     try:
         # Create translator agent
         translator = create_telegram_translator_agent(from_lang=from_lang, to_lang=to_lang)
 
-        # Attach LLM to the agent
-        llm = await translator.attach_llm(OpenAIAugmentedLLM)
+        # Use haiku for cost-efficient translation
+        llm = ClaudeCodeLLM(instruction=translator.instruction, default_model="haiku", max_turns=1)
 
         # Generate translation
-        translated = await llm.generate_str(
-            message=message,
-            request_params=RequestParams(
-                model=model,
-                maxTokens=100000,
-                temperature=0.3,  # Lower temperature for more consistent translations
-                max_iterations=1  # Single pass translation, no complex reasoning needed
-            )
-        )
+        translated = await llm.generate_str(message=message)
 
         return translated.strip()
 

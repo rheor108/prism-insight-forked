@@ -59,8 +59,6 @@ class CompressionManager:
 
         try:
             from cores.agents.memory_compressor_agent import create_memory_compressor_agent
-            from mcp_agent.workflows.llm.augmented_llm import RequestParams
-            from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
 
             results = {
                 "layer1_to_layer2": {"processed": 0, "compressed": 0},
@@ -117,26 +115,21 @@ class CompressionManager:
         """Compress Layer 1 entries to Layer 2 (summary format)."""
         try:
             from cores.agents.memory_compressor_agent import create_memory_compressor_agent
-            from mcp_agent.workflows.llm.augmented_llm import RequestParams
-            from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
+            from cores.claude_llm_adapter import ClaudeCodeLLM
 
             results = {"processed": len(entries), "compressed": 0, "errors": []}
 
             compressor_agent = create_memory_compressor_agent(self.language)
 
-            async with compressor_agent:
-                llm = await compressor_agent.attach_llm(OpenAIAugmentedLLM)
+            llm = ClaudeCodeLLM(instruction=compressor_agent.instruction)
 
-                # Fetch current prices for hindsight context
-                hindsight_prices = self._fetch_hindsight_prices(entries)
+            # Fetch current prices for hindsight context
+            hindsight_prices = self._fetch_hindsight_prices(entries)
 
-                entries_text = self._format_entries_for_compression(entries, hindsight_prices)
-                prompt = self._build_layer2_prompt(entries_text, len(entries))
+            entries_text = self._format_entries_for_compression(entries, hindsight_prices)
+            prompt = self._build_layer2_prompt(entries_text, len(entries))
 
-                response = await llm.generate_str(
-                    message=prompt,
-                    request_params=RequestParams(model="gpt-5.2", maxTokens=8000)
-                )
+            response = await llm.generate_str(message=prompt)
 
             compression_data = self._parse_response(response)
 
@@ -178,23 +171,18 @@ class CompressionManager:
         """Compress Layer 2 entries to Layer 3 and extract intuitions."""
         try:
             from cores.agents.memory_compressor_agent import create_memory_compressor_agent
-            from mcp_agent.workflows.llm.augmented_llm import RequestParams
-            from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
+            from cores.claude_llm_adapter import ClaudeCodeLLM
 
             results = {"processed": len(entries), "compressed": 0, "intuitions_generated": 0, "errors": []}
 
             compressor_agent = create_memory_compressor_agent(self.language)
 
-            async with compressor_agent:
-                llm = await compressor_agent.attach_llm(OpenAIAugmentedLLM)
+            llm = ClaudeCodeLLM(instruction=compressor_agent.instruction)
 
-                entries_text = self._format_entries_for_intuition(entries)
-                prompt = self._build_layer3_prompt(entries_text, len(entries))
+            entries_text = self._format_entries_for_intuition(entries)
+            prompt = self._build_layer3_prompt(entries_text, len(entries))
 
-                response = await llm.generate_str(
-                    message=prompt,
-                    request_params=RequestParams(model="gpt-5.2", maxTokens=8000)
-                )
+            response = await llm.generate_str(message=prompt)
 
             compression_data = self._parse_response(response)
 

@@ -55,7 +55,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> /root/.bashrc
 
 # PATH에 UV 추가
-ENV PATH="/root/.cargo/bin:$PATH"
+ENV PATH="/root/.local/bin:/root/.cargo/bin:$PATH"
 
 # Python 가상환경 생성
 RUN python3 -m venv /app/venv
@@ -70,11 +70,21 @@ RUN git clone -b main https://github.com/dragon1086/prism-insight.git /app/prism
 WORKDIR /app/prism-insight
 
 # Python 의존성 설치 (setuptools for pykrx compatibility)
-RUN pip install --no-cache-dir --upgrade pip setuptools && \
+RUN pip install --no-cache-dir --upgrade pip "setuptools<81" && \
     pip install --no-cache-dir -r requirements.txt
+
+# tabulate (yfinance dependency)
+RUN pip install --no-cache-dir tabulate
+
+# Patch mcp-agent to use streaming for Anthropic API (required for Opus large outputs)
+RUN sed -i 's/        return await client.messages.create(\*\*payload)/        async with client.messages.stream(**payload) as stream:\n            return await stream.get_final_message()/' \
+    /app/venv/lib/python3.12/site-packages/mcp_agent/workflows/llm/augmented_llm_anthropic.py
 
 # Playwright 브라우저 설치 (Chromium만)
 RUN playwright install --with-deps chromium
+
+# Claude Code CLI 설치 (Max Plan 크레딧 사용)
+RUN npm install -g @anthropic-ai/claude-code
 
 # Perplexity MCP 서버 설치 (공식 npm 패키지)
 RUN npm install -g @perplexity-ai/mcp-server
@@ -117,6 +127,9 @@ RUN chmod +x /app/prism-insight/docker/entrypoint.sh && \
 
 # 권한 설정
 RUN chmod -R 755 /app/prism-insight
+
+# Claude 인증 디렉토리 (Max Plan 토큰 마운트 포인트)
+RUN mkdir -p /root/.claude
 
 # Cron 로그 파일 생성 (cron 출력 확인용)
 RUN touch /var/log/cron.log

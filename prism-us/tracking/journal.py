@@ -95,8 +95,11 @@ class USJournalManager:
                 "cores/agents/trading_journal_agent.py"
             )
             create_trading_journal_agent = _journal_module.create_trading_journal_agent
-            from mcp_agent.workflows.llm.augmented_llm import RequestParams
-            from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
+            _llm_module = _import_from_main_cores(
+                "claude_llm_adapter",
+                "cores/claude_llm_adapter.py"
+            )
+            ClaudeCodeLLM = _llm_module.ClaudeCodeLLM
 
             ticker = stock_data.get('ticker', '')
             company_name = stock_data.get('company_name', '')
@@ -117,19 +120,15 @@ class USJournalManager:
             # Create journal agent (uses yahoo_finance instead of kospi_kosdaq)
             journal_agent = create_trading_journal_agent(self.language, market="US")
 
-            async with journal_agent:
-                llm = await journal_agent.attach_llm(OpenAIAugmentedLLM)
+            llm = ClaudeCodeLLM(instruction=journal_agent.instruction, server_names=getattr(journal_agent, 'server_names', []))
 
-                prompt = self._build_analysis_prompt(
-                    company_name, ticker, buy_price, buy_date,
-                    scenario_data, sell_price, profit_rate, holding_days, sell_reason
-                )
+            prompt = self._build_analysis_prompt(
+                company_name, ticker, buy_price, buy_date,
+                scenario_data, sell_price, profit_rate, holding_days, sell_reason
+            )
 
-                response = await llm.generate_str(
-                    message=prompt,
-                    request_params=RequestParams(model="gpt-5.2", maxTokens=16000)
-                )
-                logger.info(f"US Journal agent response received: {len(response)} chars")
+            response = await llm.generate_str(message=prompt)
+            logger.info(f"US Journal agent response received: {len(response)} chars")
 
             # Parse and save
             journal_data = self._parse_response(response)

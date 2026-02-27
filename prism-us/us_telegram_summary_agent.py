@@ -2,7 +2,7 @@
 US Telegram Summary Agent
 
 Generates telegram summary messages from US stock analysis reports.
-Uses EvaluatorOptimizerLLM workflow for quality-assured summaries.
+Uses ClaudeCodeLLM adapter for quality summaries.
 """
 
 import asyncio
@@ -15,12 +15,8 @@ from pathlib import Path
 
 from mcp_agent.agents.agent import Agent
 from mcp_agent.app import MCPApp
-from mcp_agent.workflows.llm.augmented_llm import RequestParams
-from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
-from mcp_agent.workflows.evaluator_optimizer.evaluator_optimizer import (
-    EvaluatorOptimizerLLM,
-    QualityRating,
-)
+
+from cores.claude_llm_adapter import ClaudeCodeLLM
 
 # Logging setup
 logging.basicConfig(
@@ -433,16 +429,8 @@ Provide specific feedback for improvement if rating is below EXCELLENT."""
         # Create optimizer agent
         optimizer = self.create_optimizer_agent(metadata, current_date, language)
 
-        # Create evaluator agent
-        evaluator = self.create_evaluator_agent(current_date, language)
-
-        # Setup evaluator-optimizer workflow
-        evaluator_optimizer = EvaluatorOptimizerLLM(
-            optimizer=optimizer,
-            evaluator=evaluator,
-            llm_factory=OpenAIAugmentedLLM,
-            min_rating=QualityRating.EXCELLENT
-        )
+        # Use ClaudeCodeLLM (Claude Opus is capable enough without evaluator-optimizer loop)
+        llm = ClaudeCodeLLM(instruction=optimizer.instruction)
 
         # Get display name for trigger type
         trigger_display = self._get_trigger_display_name(trigger_type)
@@ -460,16 +448,8 @@ Report Content:
             logger.info("Adding morning data warning")
             prompt_message += "\nNote: This stock was detected 10 minutes after market open. Current conditions may differ."
 
-        # Generate telegram message using evaluator-optimizer workflow
-        response = await evaluator_optimizer.generate_str(
-            message=prompt_message,
-            request_params=RequestParams(
-                model="gpt-5.2",
-                reasoning_effort="none",
-                maxTokens=6000,
-                max_iterations=2
-            )
-        )
+        # Generate telegram message using Claude
+        response = await llm.generate_str(message=prompt_message)
 
         # Process response
         logger.info(f"Response type: {type(response)}")

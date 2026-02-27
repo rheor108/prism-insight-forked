@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
 
-from mcp_agent.app import MCPApp
+import logging as _logging_module
 
 from cores.agents import get_agent_directory
 from cores.report_generation import generate_report, generate_summary, generate_investment_strategy, get_disclaimer, generate_market_report
@@ -23,7 +23,7 @@ from cores.utils import clean_markdown
 # Market analysis cache storage (global variable)
 _market_analysis_cache = {}
 
-async def analyze_stock(company_code: str = "000660", company_name: str = "SK하이닉스", reference_date: str = None, language: str = "ko"):
+async def analyze_stock(company_code: str = "000660", company_name: str = "SK하이닉스", reference_date: str = None, language: str = "ko", prefetched_data: dict = None, chart_htmls: dict = None):
     """
     Generate comprehensive stock analysis report
 
@@ -32,29 +32,29 @@ async def analyze_stock(company_code: str = "000660", company_name: str = "SK하
         company_name: Company name
         reference_date: Analysis reference date (YYYYMMDD format)
         language: Language code ("ko" or "en")
+        prefetched_data: Pre-fetched KRX data dict (skips internal prefetch if provided)
+        chart_htmls: Pre-generated chart HTML dict (skips internal chart generation if provided)
 
     Returns:
         str: Generated final report markdown text
     """
+    import logging as _logging
+    _logger = _logging.getLogger(__name__)
+
     # 1. Initial setup and preprocessing
-    app = MCPApp(name="stock_analysis")
 
     # Use today's date if reference_date is not provided
     if reference_date is None:
         reference_date = datetime.now().strftime("%Y%m%d")
 
+    # === Phase 1: KRX data access (BEFORE MCP subprocess starts) ===
+    # All KRX calls must happen here to avoid session conflicts with MCP subprocess
 
-    async with app.run() as parallel_app:
-        logger = parallel_app.logger
-        logger.info(f"Starting: {company_name}({company_code}) analysis - reference date: {reference_date}")
-
-        # 2. Create dictionary to store data as shared resource
-        section_reports = {}
-
-        # 3. Define sections to analyze
-        base_sections = ["price_volume_analysis", "investor_trading_analysis", "company_status", "company_overview", "news_analysis", "market_index_analysis"]
-
-        # 4. Prefetch data to reduce MCP tool call overhead
+    # 4. Prefetch data to reduce MCP tool call overhead
+    if prefetched_data is not None:
+        prefetched = prefetched_data
+        _logger.info(f"Using pre-fetched data for {company_name}({company_code})")
+    else:
         from cores.data_prefetch import prefetch_kr_analysis_data
         try:
             from datetime import timedelta
@@ -63,8 +63,55 @@ async def analyze_stock(company_code: str = "000660", company_name: str = "SK하
             max_years_ago_calc = (ref_date_obj - timedelta(days=365*max_years_calc)).strftime("%Y%m%d")
             prefetched = prefetch_kr_analysis_data(company_code, reference_date, max_years_ago_calc)
         except Exception as e:
-            logger.warning(f"Data prefetch failed, falling back to MCP: {e}")
+            _logger.warning(f"Data prefetch failed, falling back to MCP: {e}")
             prefetched = {}
+
+    # 10. Generate charts (BEFORE MCP subprocess to avoid KRX session conflict)
+    if chart_htmls is not None:
+        price_chart_html = chart_htmls.get("price")
+        volume_chart_html = chart_htmls.get("volume")
+        market_cap_chart_html = chart_htmls.get("market_cap")
+        fundamentals_chart_html = chart_htmls.get("fundamentals")
+        _logger.info(f"Using pre-generated charts for {company_name}({company_code})")
+    else:
+        charts_dir = os.path.join("../charts", f"{company_code}_{reference_date}")
+        os.makedirs(charts_dir, exist_ok=True)
+        try:
+            price_chart_html = get_chart_as_base64_html(
+                company_code, company_name, create_price_chart, 'Price Chart', width=900, dpi=80, image_format='jpg', compress=True,
+                days=730, adjusted=True
+            )
+            volume_chart_html = get_chart_as_base64_html(
+                company_code, company_name, create_trading_volume_chart, 'Trading Volume Chart', width=900, dpi=80, image_format='jpg', compress=True,
+                days=30
+            )
+            market_cap_chart_html = get_chart_as_base64_html(
+                company_code, company_name, create_market_cap_chart, 'Market Cap Trend', width=900, dpi=80, image_format='jpg', compress=True,
+                days=730
+            )
+            fundamentals_chart_html = get_chart_as_base64_html(
+                company_code, company_name, create_fundamentals_chart, 'Fundamental Indicators', width=900, dpi=80, image_format='jpg', compress=True,
+                days=730
+            )
+        except Exception as e:
+            _logger.error(f"Error occurred while generating charts: {str(e)}")
+            price_chart_html = None
+            volume_chart_html = None
+            market_cap_chart_html = None
+            fundamentals_chart_html = None
+
+    _logger.info(f"Phase 1 complete for {company_name}({company_code}): KRX data and charts ready")
+
+    # === Phase 2: LLM analysis (claude -p calls, no MCPApp needed) ===
+    if True:
+        logger = _logging_module.getLogger("stock_analysis")
+        logger.info(f"Starting: {company_name}({company_code}) analysis - reference date: {reference_date}")
+
+        # 2. Create dictionary to store data as shared resource
+        section_reports = {}
+
+        # 3. Define sections to analyze
+        base_sections = ["price_volume_analysis", "investor_trading_analysis", "company_status", "company_overview", "news_analysis", "market_index_analysis"]
 
         # 5. Get agents (with prefetched data)
         agents = get_agent_directory(company_name, company_code, reference_date, base_sections, language, prefetched_data=prefetched)
@@ -81,33 +128,29 @@ async def analyze_stock(company_code: str = "000660", company_name: str = "SK하
             logger.info(f"Running analysis in PARALLEL mode for {company_name}...")
 
             async def process_section(section):
-                """Process a single section with its own MCPApp context"""
+                """Process a single section with claude -p"""
                 if section not in agents:
                     return section, None
 
-                # Create independent MCPApp instance for each section
-                section_app = MCPApp(name=f"stock_analysis_{section}")
-
-                async with section_app.run() as section_context:
-                    section_logger = section_context.logger
-                    section_logger.info(f"Processing {section} for {company_name}...")
-                    try:
-                        agent = agents[section]
-                        if section == "market_index_analysis":
-                            if "report" in _market_analysis_cache:
-                                section_logger.info(f"Using cached market analysis")
-                                return section, _market_analysis_cache["report"]
-                            else:
-                                section_logger.info(f"Generating new market analysis")
-                                report = await generate_market_report(agent, section, reference_date, section_logger, language)
-                                _market_analysis_cache["report"] = report
-                                return section, report
+                section_logger = _logging_module.getLogger(f"stock_analysis.{section}")
+                section_logger.info(f"Processing {section} for {company_name}...")
+                try:
+                    agent = agents[section]
+                    if section == "market_index_analysis":
+                        if "report" in _market_analysis_cache:
+                            section_logger.info(f"Using cached market analysis")
+                            return section, _market_analysis_cache["report"]
                         else:
-                            report = await generate_report(agent, section, company_name, company_code, reference_date, section_logger, language)
+                            section_logger.info(f"Generating new market analysis")
+                            report = await generate_market_report(agent, section, reference_date, section_logger, language)
+                            _market_analysis_cache["report"] = report
                             return section, report
-                    except Exception as e:
-                        section_logger.error(f"Final failure processing {section}: {e}")
-                        return section, f"Analysis failed: {section}"
+                    else:
+                        report = await generate_report(agent, section, company_name, company_code, reference_date, section_logger, language)
+                        return section, report
+                except Exception as e:
+                    section_logger.error(f"Final failure processing {section}: {e}")
+                    return section, f"Analysis failed: {section}"
 
             # Execute all sections in parallel (each with its own MCPApp context)
             results = await asyncio.gather(*[process_section(section) for section in base_sections])
@@ -196,37 +239,7 @@ async def analyze_stock(company_code: str = "000660", company_name: str = "SK하
             logger.error(f"Error generating executive summary: {e}")
             executive_summary = "## 핵심 요약\n\n요약 생성 중 오류가 발생했습니다." if language == "ko" else "## Executive Summary\n\nProblem occurred while generating analysis summary."
 
-        # 10. Generate charts
-        charts_dir = os.path.join("../charts", f"{company_code}_{reference_date}")
-        os.makedirs(charts_dir, exist_ok=True)
-
-        try:
-            # Generate chart images
-            price_chart_html = get_chart_as_base64_html(
-                company_code, company_name, create_price_chart, 'Price Chart', width=900, dpi=80, image_format='jpg', compress=True,
-                days=730, adjusted=True
-            )
-
-            volume_chart_html = get_chart_as_base64_html(
-                company_code, company_name, create_trading_volume_chart, 'Trading Volume Chart', width=900, dpi=80, image_format='jpg', compress=True,
-                days=30  # Supply/demand analysis based on 1 month
-            )
-
-            market_cap_chart_html = get_chart_as_base64_html(
-                company_code, company_name, create_market_cap_chart, 'Market Cap Trend', width=900, dpi=80, image_format='jpg', compress=True,
-                days=730
-            )
-
-            fundamentals_chart_html = get_chart_as_base64_html(
-                company_code, company_name, create_fundamentals_chart, 'Fundamental Indicators', width=900, dpi=80, image_format='jpg', compress=True,
-                days=730
-            )
-        except Exception as e:
-            logger.error(f"Error occurred while generating charts: {str(e)}")
-            price_chart_html = None
-            volume_chart_html = None
-            market_cap_chart_html = None
-            fundamentals_chart_html = None
+        # 10. Charts already generated in Phase 1 (before MCP subprocess)
 
         # 11. Compose final report with proper heading hierarchy
         disclaimer = get_disclaimer(language)

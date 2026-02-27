@@ -1,7 +1,5 @@
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from mcp_agent.agents.agent import Agent
-from mcp_agent.workflows.llm.augmented_llm import RequestParams
-from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
+from cores.claude_llm_adapter import ClaudeCodeLLM
 
 
 # Language name mapping for report generation
@@ -36,7 +34,7 @@ async def generate_report(agent, section, company_name, company_code, reference_
     """
     language_name = LANGUAGE_NAMES.get(language, language.upper())
 
-    llm = await agent.attach_llm(OpenAIAugmentedLLM)
+    llm = ClaudeCodeLLM(instruction=agent.instruction, server_names=getattr(agent, 'server_names', []))
 
     # Create language-specific message
     if language == "ko":
@@ -100,16 +98,7 @@ async def generate_report(agent, section, company_name, company_code, reference_
 ##Analysis Date: {reference_date} (YYYYMMDD format)
 """
 
-    report = await llm.generate_str(
-        message=message,
-        request_params=RequestParams(
-            model="gpt-5.2",
-            reasoning_effort="none",
-            maxTokens=32000,
-            parallel_tool_calls=True,
-            use_history=True
-        )
-    )
+    report = await llm.generate_str(message=message)
     logger.info(f"Completed {section} - {len(report)} characters")
     return report
 
@@ -126,7 +115,7 @@ async def generate_market_report(agent, section, reference_date, logger, languag
     """
     language_name = LANGUAGE_NAMES.get(language, language.upper())
 
-    llm = await agent.attach_llm(OpenAIAugmentedLLM)
+    llm = ClaudeCodeLLM(instruction=agent.instruction, server_names=getattr(agent, 'server_names', []))
 
     # Create language-specific message
     if language == "ko":
@@ -190,17 +179,7 @@ async def generate_market_report(agent, section, reference_date, logger, languag
 ##Analysis Date: {reference_date} (YYYYMMDD format)
 """
 
-    report = await llm.generate_str(
-        message=message,
-        request_params=RequestParams(
-            model="gpt-5.2",
-            reasoning_effort="none",
-            maxTokens=32000,
-            max_iterations=3,
-            parallel_tool_calls=True,
-            use_history=True
-        )
-    )
+    report = await llm.generate_str(message=message)
     logger.info(f"Completed {section} - {len(report)} characters")
     return report
 
@@ -218,10 +197,6 @@ async def generate_summary(section_reports, company_name, company_code, referenc
         language: Report language code (default: "ko")
     """
     try:
-        from mcp_agent.agents.agent import Agent
-        from mcp_agent.workflows.llm.augmented_llm import RequestParams
-        from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
-
         language_name = LANGUAGE_NAMES.get(language, language.upper())
 
         # Generate comprehensive report including all sections
@@ -295,23 +270,8 @@ Comprehensive Analysis Report:
 {all_reports}
 """
 
-        summary_agent = Agent(
-            name="summary_agent",
-            instruction=instruction
-        )
-
-        llm = await summary_agent.attach_llm(OpenAIAugmentedLLM)
-        executive_summary = await llm.generate_str(
-            message=message,
-            request_params=RequestParams(
-                model="gpt-5.2",
-                reasoning_effort="none",
-                maxTokens=16000,
-                max_iterations=2,
-                parallel_tool_calls=True,
-                use_history=True
-            )
-        )
+        llm = ClaudeCodeLLM(instruction=instruction)
+        executive_summary = await llm.generate_str(message=message)
         return executive_summary
     except Exception as e:
         logger.error(f"Error generating executive summary: {e}")
@@ -334,10 +294,6 @@ async def generate_investment_strategy(section_reports, combined_reports, compan
         logger: Logger
         language: Report language code (default: "ko")
     """
-    from mcp_agent.agents.agent import Agent
-    from mcp_agent.workflows.llm.augmented_llm import RequestParams
-    from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
-
     language_name = LANGUAGE_NAMES.get(language, language.upper())
 
     try:
@@ -532,23 +488,8 @@ Please present a consistent and executable investment strategy that investors ca
 ## ⚠️ CHARACTER LIMIT: Keep the report under 3000 characters. Be concise and focus on key insights!
 """
 
-        investment_strategy_agent = Agent(
-            name="investment_strategy_agent",
-            instruction=instruction
-        )
-
-        llm = await investment_strategy_agent.attach_llm(OpenAIAugmentedLLM)
-        investment_strategy = await llm.generate_str(
-            message=message,
-            request_params=RequestParams(
-                model="gpt-5.2",
-                reasoning_effort="none",
-                maxTokens=32000,
-                max_iterations=3,
-                parallel_tool_calls=True,
-                use_history=True
-            )
-        )
+        llm = ClaudeCodeLLM(instruction=instruction)
+        investment_strategy = await llm.generate_str(message=message)
         logger.info(f"Completed investment_strategy - {len(investment_strategy)} characters")
         return investment_strategy
     except Exception as e:

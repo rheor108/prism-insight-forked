@@ -6,11 +6,16 @@ AI-based dashboard data translation utilities
 import asyncio
 import json
 import logging
+import sys
+from pathlib import Path
 from typing import Dict, Any, List
 
-from mcp_agent.agents.agent import Agent
-from mcp_agent.workflows.llm.augmented_llm import RequestParams
-from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
+# Add project root to sys.path for cores imports
+_PROJECT_ROOT = str(Path(__file__).parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from cores.claude_llm_adapter import ClaudeCodeLLM
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +28,15 @@ class DashboardTranslator:
         Initialize translator
 
         Args:
-            model: OpenAI model to use (default: gpt-5-nano)
+            model: Model name (legacy parameter, mapped internally to Claude model)
         """
         self.model = model
 
         # Translation cache (prevent re-translating identical text)
         self.translation_cache = {}
 
-        # Create translation agent
-        self.translation_agent = Agent(
-            name="translation_agent",
+        # Create ClaudeCodeLLM for translation (haiku for lightweight translation tasks)
+        self.llm = ClaudeCodeLLM(
             instruction="""You are a professional Korean-to-English translator specializing in financial and stock market terminology.
 
 Your task:
@@ -50,7 +54,9 @@ Guidelines:
 - Use proper financial English conventions
 
 Return ONLY the translated text without explanations or comments.
-"""
+""",
+            default_model="haiku",
+            max_turns=1,
         )
     
     async def translate_text(self, text: str, from_lang: str = "ko", to_lang: str = "en") -> str:
@@ -75,16 +81,10 @@ Return ONLY the translated text without explanations or comments.
             return self.translation_cache[cache_key]
         
         try:
-            llm = await self.translation_agent.attach_llm(OpenAIAugmentedLLM)
-            translated = await llm.generate_str(
+            translated = await self.llm.generate_str(
                 message=f"Translate the following Korean text to English:\n\n{text}",
-                request_params=RequestParams(
-                    model=self.model,
-                    maxTokens=100000,
-                    max_iterations=1
-                )
             )
-            
+
             translated = translated.strip()
 
             # Save to cache
@@ -131,19 +131,13 @@ Return ONLY the translated text without explanations or comments.
 
             batch_text = "\n\n".join(batch_input)
             
-            llm = await self.translation_agent.attach_llm(OpenAIAugmentedLLM)
-            translated_batch = await llm.generate_str(
+            translated_batch = await self.llm.generate_str(
                 message=f"""Translate the following numbered Korean texts to English.
 Maintain the numbering format [1], [2], etc. in your response.
 
 {batch_text}
 
 Return the translations in the same numbered format.""",
-                request_params=RequestParams(
-                    model=self.model,
-                    maxTokens=100000,
-                    max_iterations=1
-                )
             )
 
             # Parse based on numbering

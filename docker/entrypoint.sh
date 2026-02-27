@@ -51,7 +51,16 @@ echo ""
 echo "[INIT] Environment Check:"
 echo "  - Python: $(python3 --version)"
 echo "  - Node.js: $(node --version)"
+echo "  - Claude Code: $(claude --version 2>/dev/null || echo 'NOT INSTALLED')"
 echo "  - Working Dir: $(pwd)"
+
+# Check Claude Code authentication
+if [ -d /root/.claude ] && [ -f /root/.claude/.credentials.json ]; then
+    echo "  - Claude Auth: OK (Max Plan credentials mounted)"
+else
+    echo "  - Claude Auth: WARNING - ~/.claude not mounted. claude -p calls will fail."
+    echo "  - Mount with: -v ~/.claude:/root/.claude:ro"
+fi
 
 # Check if .env has been configured
 if grep -q "your_telegram_bot_token" /app/prism-insight/.env 2>/dev/null; then

@@ -40,10 +40,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# MCP related imports
-from mcp_agent.app import MCPApp
-from mcp_agent.workflows.llm.augmented_llm import RequestParams
-from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
+# LLM adapter (Claude Code bridge)
+from cores.claude_llm_adapter import ClaudeCodeLLM
 
 # Core agent imports
 from cores.agents.trading_agents import create_trading_scenario_agent
@@ -174,12 +172,14 @@ class StockTrackingAgent:
         return extract_ticker_info(report_path)
 
     async def _get_current_stock_price(self, ticker: str) -> float:
-        """Get current stock price (delegates to tracking.helpers)"""
-        return await get_current_stock_price(self.cursor, ticker)
+        """Get current stock price (delegates to tracking.helpers, uses cache if available)"""
+        price_cache = getattr(self, '_prefetched_prices', None)
+        return await get_current_stock_price(self.cursor, ticker, price_cache=price_cache)
 
     async def _get_trading_value_rank_change(self, ticker: str) -> Tuple[float, str]:
-        """Calculate trading value ranking change (delegates to tracking.helpers)"""
-        return await get_trading_value_rank_change(ticker)
+        """Calculate trading value ranking change (delegates to tracking.helpers, uses cache if available)"""
+        ohlcv_cache = getattr(self, '_prefetched_ohlcv_cache', None)
+        return await get_trading_value_rank_change(ticker, ohlcv_cache=ohlcv_cache)
 
     async def _is_ticker_in_holdings(self, ticker: str) -> bool:
         """Check if stock is already in holdings (delegates to tracking.helpers)"""
@@ -286,7 +286,7 @@ class StockTrackingAgent:
                 """
 
             # LLM call to generate trading scenario
-            llm = await self.trading_agent.attach_llm(OpenAIAugmentedLLM)
+            llm = ClaudeCodeLLM(instruction=self.trading_agent.instruction, server_names=getattr(self.trading_agent, 'server_names', []))
 
             # Build trigger info section if available
             trigger_info_section = ""
@@ -336,13 +336,7 @@ class StockTrackingAgent:
                 {report_content}
                 """
 
-            response = await llm.generate_str(
-                message=prompt_message,
-                request_params=RequestParams(
-                    model="gpt-5.2",
-                    maxTokens=20000
-                )
-            )
+            response = await llm.generate_str(message=prompt_message)
 
             # JSON parsing
             # TODO: Create model and call generate_structured function to improve code maintainability

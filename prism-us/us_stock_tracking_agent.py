@@ -53,8 +53,9 @@ logger = logging.getLogger(__name__)
 
 # MCP related imports
 from mcp_agent.app import MCPApp
-from mcp_agent.workflows.llm.augmented_llm import RequestParams
-from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
+
+# LLM adapter (Claude Code bridge)
+from cores.claude_llm_adapter import ClaudeCodeLLM
 
 # Import US-specific modules
 # Use explicit path to avoid conflicts with main project
@@ -390,7 +391,7 @@ class USStockTrackingAgent:
         self,
         db_path: str = "stock_tracking_db.sqlite",
         telegram_token: str = None,
-        enable_journal: bool = False
+        enable_journal: bool = None
     ):
         """
         Initialize US Stock Tracking Agent.
@@ -408,7 +409,14 @@ class USStockTrackingAgent:
         self.conn = None
         self.cursor = None
         self.language = "en"  # Default to English for US
-        self.enable_journal = enable_journal
+
+        # Set trading journal feature flag
+        # Priority: parameter > environment variable > default (False)
+        if enable_journal is not None:
+            self.enable_journal = enable_journal
+        else:
+            env_value = os.environ.get("ENABLE_TRADING_JOURNAL", "false").lower()
+            self.enable_journal = env_value in ("true", "1", "yes")
 
         # Journal and compression managers (initialized in initialize())
         self.journal_manager = None
@@ -599,7 +607,7 @@ class USStockTrackingAgent:
                 """
 
             # LLM call to generate trading scenario
-            llm = await self.trading_agent.attach_llm(OpenAIAugmentedLLM)
+            llm = ClaudeCodeLLM(instruction=self.trading_agent.instruction, server_names=getattr(self.trading_agent, 'server_names', []))
 
             # Build trigger info section
             trigger_info_section = ""
@@ -625,13 +633,7 @@ class USStockTrackingAgent:
             {report_content}
             """
 
-            response = await llm.generate_str(
-                message=prompt_message,
-                request_params=RequestParams(
-                    model="gpt-5.2",
-                    maxTokens=20000
-                )
-            )
+            response = await llm.generate_str(message=prompt_message)
 
             # JSON parsing
             try:
