@@ -54,8 +54,9 @@ logger = logging.getLogger(__name__)
 # MCP related imports
 from mcp_agent.app import MCPApp
 
-# LLM adapter (Claude Code bridge)
-from cores.claude_llm_adapter import ClaudeCodeLLM
+# LLM adapter (Claude Code bridge) - deferred import via _import_from_main_cores
+# to avoid namespace collision with prism-us/cores/
+ClaudeCodeLLM = None  # Initialized after _import_from_main_cores is defined
 
 # Import US-specific modules
 # Use explicit path to avoid conflicts with main project
@@ -87,6 +88,13 @@ def _import_from_main_cores(module_name: str, relative_path: str):
     spec.loader.exec_module(module)
     return module
 
+
+# Pre-load ClaudeCodeLLM from main project cores (avoid prism-us/cores/ namespace collision)
+_llm_adapter_module = _import_from_main_cores(
+    "claude_llm_adapter",
+    "cores/claude_llm_adapter.py"
+)
+ClaudeCodeLLM = _llm_adapter_module.ClaudeCodeLLM
 
 # Pre-load telegram_translator_agent from main project (used in multiple methods)
 _translator_module = _import_from_main_cores(

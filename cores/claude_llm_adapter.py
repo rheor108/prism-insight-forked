@@ -19,7 +19,18 @@ Usage (replaces OpenAIAugmentedLLM pattern):
 import logging
 from typing import Optional
 
-from cores.claude_llm_bridge import claude_generate
+try:
+    from cores.claude_llm_bridge import claude_generate
+except (ModuleNotFoundError, ImportError):
+    # Fallback for when 'cores' resolves to a different package (e.g. prism-us/cores/)
+    import importlib.util as _ilu
+    from pathlib import Path as _Path
+    _spec = _ilu.spec_from_file_location(
+        "claude_llm_bridge", _Path(__file__).parent / "claude_llm_bridge.py"
+    )
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    claude_generate = _mod.claude_generate
 
 logger = logging.getLogger(__name__)
 

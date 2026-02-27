@@ -16,8 +16,6 @@ from pathlib import Path
 from mcp_agent.agents.agent import Agent
 from mcp_agent.app import MCPApp
 
-from cores.claude_llm_adapter import ClaudeCodeLLM
-
 # Logging setup
 logging.basicConfig(
     level=logging.INFO,
@@ -27,10 +25,22 @@ logger = logging.getLogger(__name__)
 
 # Add parent directory to path for imports
 import sys
+import importlib.util
 _prism_us_dir = Path(__file__).parent
 sys.path.insert(0, str(_prism_us_dir))
 _project_root = _prism_us_dir.parent
 sys.path.insert(0, str(_project_root))
+
+# Import ClaudeCodeLLM from main project cores (avoid prism-us/cores/ namespace collision)
+def _import_from_main_cores(module_name: str, relative_path: str):
+    file_path = _project_root / relative_path
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+_llm_adapter_module = _import_from_main_cores("claude_llm_adapter", "cores/claude_llm_adapter.py")
+ClaudeCodeLLM = _llm_adapter_module.ClaudeCodeLLM
 
 # MCPApp instance
 app = MCPApp(name="us_telegram_summary")

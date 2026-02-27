@@ -20,6 +20,11 @@ import importlib.util
 _prism_us_dir = Path(__file__).parent.parent
 _project_root = Path(__file__).parent.parent.parent
 
+# Add project root to sys.path so that modules loaded via importlib (e.g. report_generation.py)
+# can resolve their own imports like 'from cores.claude_llm_adapter import ...'
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
 # Import from main project's cores using direct file import to avoid namespace collision
 # This is necessary because prism-us/cores/ shadows the main project's cores/
 def _import_from_project_root(module_name: str, file_path: Path):

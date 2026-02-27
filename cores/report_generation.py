@@ -1,5 +1,18 @@
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from cores.claude_llm_adapter import ClaudeCodeLLM
+
+try:
+    from cores.claude_llm_adapter import ClaudeCodeLLM
+except (ModuleNotFoundError, ImportError):
+    # When loaded via importlib from prism-us (where cores resolves to prism-us/cores/),
+    # fall back to direct file-based import relative to this file's location.
+    import importlib.util as _ilu
+    from pathlib import Path as _Path
+    _spec = _ilu.spec_from_file_location(
+        "claude_llm_adapter", _Path(__file__).parent / "claude_llm_adapter.py"
+    )
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    ClaudeCodeLLM = _mod.ClaudeCodeLLM
 
 
 # Language name mapping for report generation
