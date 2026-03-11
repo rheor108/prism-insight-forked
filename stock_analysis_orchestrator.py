@@ -301,13 +301,23 @@ class StockAnalysisOrchestrator:
             tickers = []
             ticker_codes = set()  # For duplicate checking
 
+            # Load stock_map.json once for name fallback
+            _stock_name_map = {}
+            try:
+                stock_map_path = Path(__file__).parent / "stock_map.json"
+                if stock_map_path.exists():
+                    with open(stock_map_path, 'r', encoding='utf-8') as f:
+                        _stock_name_map = json.load(f).get("code_to_name", {})
+            except Exception:
+                pass
+
             # results is dict like {"Volume Surge Top Stocks": DataFrame, ...}
             for trigger_type, stocks_df in results.items():
                 if hasattr(stocks_df, 'index'):  # It's a DataFrame
                     for ticker in stocks_df.index:
                         if ticker not in ticker_codes:
                             ticker_codes.add(ticker)
-                            # Get stock name (with fallback to pykrx API)
+                            # Get stock name (with fallback chain)
                             name = ""
                             # Support both Korean and English column names
                             name_col = None
@@ -318,7 +328,10 @@ class StockAnalysisOrchestrator:
 
                             if name_col:
                                 name = stocks_df.loc[ticker, name_col]
-                            # Fallback: use pykrx API if name is empty
+                            # Fallback 1: stock_map.json
+                            if not name:
+                                name = _stock_name_map.get(ticker, "")
+                            # Fallback 2: pykrx API
                             if not name:
                                 try:
                                     from pykrx import stock as stock_api
@@ -886,7 +899,6 @@ class StockAnalysisOrchestrator:
 
                     # Import tracking agent
                     from stock_tracking_enhanced_agent import EnhancedStockTrackingAgent as StockTrackingAgent
-                    from stock_tracking_agent import app as tracking_app
 
                     # Validate telegram configuration
                     if self.telegram_config.use_telegram:
@@ -901,130 +913,43 @@ class StockAnalysisOrchestrator:
                     # Log telegram configuration status
                     self.telegram_config.log_status()
 
-                    # === Pre-fetch tracking data BEFORE MCP subprocess starts ===
-                    # Prevents KRX session conflict between tracking MCP subprocess and main process
-                    prefetched_prices = {}
-                    prefetched_market_data = {}
-                    prefetched_ohlcv_cache = {}
-                    try:
-                        from krx_data_client import (
-                            get_nearest_business_day_in_a_week,
-                            get_market_ohlcv_by_ticker,
-                            get_index_ohlcv_by_date
-                        )
-                        import datetime as dt
+                    # === Use tracking data pre-fetched in Phase 0-B (before MCP invalidated KRX session) ===
+                    prefetched_prices = getattr(self, '_tracking_prefetched_prices', {})
+                    prefetched_market_data = getattr(self, '_tracking_prefetched_market_data', {})
+                    prefetched_ohlcv_cache = getattr(self, '_tracking_prefetched_ohlcv_cache', {})
+                    prefetched_per_stock_ohlcv = getattr(self, '_tracking_prefetched_per_stock_ohlcv', {})
+                    logger.info(
+                        f"Tracking data from Phase 0-B: prices={len(prefetched_prices)}, "
+                        f"ohlcv_cache={len(prefetched_ohlcv_cache)}, "
+                        f"market_data={'yes' if prefetched_market_data else 'no'}, "
+                        f"per_stock_ohlcv={len(prefetched_per_stock_ohlcv)}"
+                    )
 
-                        today = dt.datetime.now().strftime("%Y%m%d")
-                        trade_date = get_nearest_business_day_in_a_week(today, prev=True)
+                    # Pass telegram configuration to agent
+                    tracking_agent = StockTrackingAgent(
+                        telegram_token=self.telegram_config.bot_token if self.telegram_config.use_telegram else None
+                    )
 
-                        # Batch fetch all stock prices at once (most recent trading day)
-                        price_df = get_market_ohlcv_by_ticker(trade_date)
-                        if price_df is not None and not price_df.empty:
-                            for ticker_code in price_df.index:
-                                prefetched_prices[ticker_code] = float(price_df.loc[ticker_code, "Close"])
-                            prefetched_ohlcv_cache[trade_date] = price_df
-                            logger.info(f"Pre-fetched prices for {len(prefetched_prices)} stocks (trade_date: {trade_date})")
+                    # Inject pre-fetched data into tracking agent
+                    tracking_agent._prefetched_prices = prefetched_prices
+                    tracking_agent._prefetched_market_data = prefetched_market_data
+                    tracking_agent._prefetched_ohlcv_cache = prefetched_ohlcv_cache
+                    tracking_agent._prefetched_per_stock_ohlcv = prefetched_per_stock_ohlcv
 
-                        # Also fetch previous trading day for rank change analysis
-                        previous_date_obj = dt.datetime.strptime(trade_date, "%Y%m%d") - dt.timedelta(days=1)
-                        previous_date = get_nearest_business_day_in_a_week(
-                            previous_date_obj.strftime("%Y%m%d"), prev=True
-                        )
-                        prev_df = get_market_ohlcv_by_ticker(previous_date)
-                        if prev_df is not None and not prev_df.empty:
-                            prefetched_ohlcv_cache[previous_date] = prev_df
-                            logger.info(f"Pre-fetched previous day OHLCV (prev_date: {previous_date})")
+                    # Pass report paths, telegram configuration, and language
+                    chat_id = self.telegram_config.channel_id if self.telegram_config.use_telegram else None
 
-                        # Fetch KOSPI/KOSDAQ index data for market condition analysis
-                        one_month_ago = (dt.datetime.now() - dt.timedelta(days=30)).strftime("%Y%m%d")
-                        kospi_data = get_index_ohlcv_by_date(one_month_ago, today, "1001")
-                        kosdaq_data = get_index_ohlcv_by_date(one_month_ago, today, "2001")
-                        if kospi_data is not None and kosdaq_data is not None:
-                            prefetched_market_data = {
-                                "kospi": kospi_data,
-                                "kosdaq": kosdaq_data
-                            }
-                            logger.info("Pre-fetched KOSPI/KOSDAQ index data for market condition analysis")
+                    # Pass trigger results file for trigger_type tracking
+                    trigger_results_file = f"trigger_results_{mode}_{datetime.now().strftime('%Y%m%d')}.json"
+                    tracking_success = await tracking_agent.run(
+                        pdf_paths, chat_id, language, self.telegram_config,
+                        trigger_results_file=trigger_results_file
+                    )
 
-                    except Exception as prefetch_err:
-                        logger.warning(f"Tracking data pre-fetch failed (will fallback to MCP): {prefetch_err}")
-
-                    # === Pre-fetch per-stock OHLCV for volatility/trend analysis ===
-                    # Prevents _get_stock_volatility() and _analyze_trend() from calling KRX directly
-                    prefetched_per_stock_ohlcv = {}
-                    try:
-                        from krx_data_client import get_market_ohlcv_by_date as get_ohlcv_by_date_range
-                        import datetime as dt
-
-                        today_str = dt.datetime.now().strftime("%Y%m%d")
-                        start_90d = (dt.datetime.now() - dt.timedelta(days=90)).strftime("%Y%m%d")
-
-                        # Collect tickers: holdings + trigger results
-                        ohlcv_tickers = set()
-
-                        # From holdings
-                        import sqlite3
-                        db_conn = sqlite3.connect("stock_tracking_db.sqlite")
-                        db_cursor = db_conn.cursor()
-                        db_cursor.execute("SELECT ticker FROM stock_holdings")
-                        for row in db_cursor.fetchall():
-                            ohlcv_tickers.add(row[0])
-                        db_conn.close()
-
-                        # From trigger results
-                        trigger_results_file = f"trigger_results_{mode}_{datetime.now().strftime('%Y%m%d')}.json"
-                        if os.path.exists(trigger_results_file):
-                            with open(trigger_results_file, 'r', encoding='utf-8') as f:
-                                tr_data = json.load(f)
-                            for key, value in tr_data.items():
-                                if key != "metadata" and isinstance(value, list):
-                                    for stock in value:
-                                        if isinstance(stock, dict) and "code" in stock:
-                                            ohlcv_tickers.add(stock["code"])
-
-                        # Fetch per-stock OHLCV
-                        for tk in ohlcv_tickers:
-                            try:
-                                ohlcv_df = get_ohlcv_by_date_range(start_90d, today_str, tk)
-                                if ohlcv_df is not None and not ohlcv_df.empty:
-                                    prefetched_per_stock_ohlcv[tk] = ohlcv_df
-                            except Exception as tk_err:
-                                logger.warning(f"Per-stock OHLCV fetch failed for {tk}: {tk_err}")
-
-                        logger.info(f"Pre-fetched per-stock OHLCV for {len(prefetched_per_stock_ohlcv)}/{len(ohlcv_tickers)} stocks")
-
-                    except Exception as per_stock_err:
-                        logger.warning(f"Per-stock OHLCV pre-fetch failed (will fallback to direct KRX): {per_stock_err}")
-
-                    logger.info("Tracking data pre-fetch complete, starting MCP tracking app")
-
-                    # Use MCPApp context manager
-                    async with tracking_app.run():
-                        # Pass telegram configuration to agent
-                        tracking_agent = StockTrackingAgent(
-                            telegram_token=self.telegram_config.bot_token if self.telegram_config.use_telegram else None
-                        )
-
-                        # Inject pre-fetched data into tracking agent
-                        tracking_agent._prefetched_prices = prefetched_prices
-                        tracking_agent._prefetched_market_data = prefetched_market_data
-                        tracking_agent._prefetched_ohlcv_cache = prefetched_ohlcv_cache
-                        tracking_agent._prefetched_per_stock_ohlcv = prefetched_per_stock_ohlcv
-
-                        # Pass report paths, telegram configuration, and language
-                        chat_id = self.telegram_config.channel_id if self.telegram_config.use_telegram else None
-
-                        # Pass trigger results file for trigger_type tracking
-                        trigger_results_file = f"trigger_results_{mode}_{datetime.now().strftime('%Y%m%d')}.json"
-                        tracking_success = await tracking_agent.run(
-                            pdf_paths, chat_id, language, self.telegram_config,
-                            trigger_results_file=trigger_results_file
-                        )
-
-                        if tracking_success:
-                            logger.info("Tracking system batch execution complete")
-                        else:
-                            logger.error("Tracking system batch execution failed")
+                    if tracking_success:
+                        logger.info("Tracking system batch execution complete")
+                    else:
+                        logger.error("Tracking system batch execution failed")
 
                 except Exception as e:
                     logger.error(f"Error during tracking system batch execution: {str(e)}")
@@ -1088,13 +1013,45 @@ class StockAnalysisOrchestrator:
             get_chart_as_base64_html
         )
 
-        for idx, ticker_info in enumerate(tickers, 1):
+        # Load stock_map.json for company name fallback
+        stock_name_map = {}
+        try:
+            stock_map_path = Path(__file__).parent / "stock_map.json"
+            if stock_map_path.exists():
+                with open(stock_map_path, 'r', encoding='utf-8') as f:
+                    stock_map_data = json.load(f)
+                stock_name_map = stock_map_data.get("code_to_name", {})
+                logger.info(f"Loaded stock_map.json: {len(stock_name_map)} entries")
+        except Exception as e:
+            logger.warning(f"Failed to load stock_map.json: {e}")
+
+        def _resolve_company_name(ticker_info):
+            """Resolve company name from ticker info with stock_map.json fallback."""
             if isinstance(ticker_info, dict):
                 ticker = ticker_info.get('code')
-                company_name = ticker_info.get('name') or f"Stock_{ticker}"
+                name = ticker_info.get('name') or ""
             else:
                 ticker = ticker_info
-                company_name = f"Stock_{ticker}"
+                name = ""
+
+            if not name:
+                # Fallback 1: stock_map.json
+                name = stock_name_map.get(ticker, "")
+            if not name:
+                # Fallback 2: pykrx API
+                try:
+                    from pykrx import stock as stock_api
+                    name = stock_api.get_market_ticker_name(ticker) or ""
+                except Exception:
+                    pass
+            if not name:
+                name = f"Stock_{ticker}"
+                logger.warning(f"Could not resolve company name for {ticker}, using fallback: {name}")
+
+            return ticker, name
+
+        for idx, ticker_info in enumerate(tickers, 1):
+            ticker, company_name = _resolve_company_name(ticker_info)
 
             # Prefetch KRX analysis data
             try:
@@ -1136,19 +1093,95 @@ class StockAnalysisOrchestrator:
                 logger.warning(f"[{idx}/{len(tickers)}] Chart generation failed for {company_name}({ticker}): {e}")
                 all_charts[ticker] = {}
 
+        # === Phase 0-B: Pre-fetch tracking data while KRX session is still valid ===
+        # Must happen BEFORE Phase 1 (MCP subprocess) which invalidates KRX session
+        self._tracking_prefetched_prices = {}
+        self._tracking_prefetched_market_data = {}
+        self._tracking_prefetched_ohlcv_cache = {}
+        self._tracking_prefetched_per_stock_ohlcv = {}
+        try:
+            from krx_data_client import (
+                get_nearest_business_day_in_a_week,
+                get_market_ohlcv_by_ticker,
+                get_index_ohlcv_by_date,
+                get_market_ohlcv_by_date as get_ohlcv_by_date_range
+            )
+            import datetime as dt
+
+            today = dt.datetime.now().strftime("%Y%m%d")
+            trade_date = get_nearest_business_day_in_a_week(today, prev=True)
+
+            # Batch fetch all stock prices (most recent trading day)
+            price_df = get_market_ohlcv_by_ticker(trade_date)
+            if price_df is not None and not price_df.empty:
+                for ticker_code in price_df.index:
+                    self._tracking_prefetched_prices[ticker_code] = float(price_df.loc[ticker_code, "Close"])
+                self._tracking_prefetched_ohlcv_cache[trade_date] = price_df
+                logger.info(f"Phase 0-B: Pre-fetched prices for {len(self._tracking_prefetched_prices)} stocks (trade_date: {trade_date})")
+
+            # Previous trading day for rank change analysis
+            previous_date_obj = dt.datetime.strptime(trade_date, "%Y%m%d") - dt.timedelta(days=1)
+            previous_date = get_nearest_business_day_in_a_week(
+                previous_date_obj.strftime("%Y%m%d"), prev=True
+            )
+            prev_df = get_market_ohlcv_by_ticker(previous_date)
+            if prev_df is not None and not prev_df.empty:
+                self._tracking_prefetched_ohlcv_cache[previous_date] = prev_df
+                logger.info(f"Phase 0-B: Pre-fetched previous day OHLCV (prev_date: {previous_date})")
+
+            # KOSPI/KOSDAQ index data for market condition analysis
+            one_month_ago = (dt.datetime.now() - dt.timedelta(days=30)).strftime("%Y%m%d")
+            kospi_data = get_index_ohlcv_by_date(one_month_ago, today, "1001")
+            kosdaq_data = get_index_ohlcv_by_date(one_month_ago, today, "2001")
+            if kospi_data is not None and kosdaq_data is not None:
+                self._tracking_prefetched_market_data = {
+                    "kospi": kospi_data,
+                    "kosdaq": kosdaq_data
+                }
+                logger.info("Phase 0-B: Pre-fetched KOSPI/KOSDAQ index data")
+
+            # Per-stock OHLCV for volatility/trend analysis
+            ohlcv_tickers = set()
+            # From holdings
+            import sqlite3 as _sqlite3
+            _db_conn = _sqlite3.connect("stock_tracking_db.sqlite")
+            _db_cursor = _db_conn.cursor()
+            _db_cursor.execute("SELECT ticker FROM stock_holdings")
+            for row in _db_cursor.fetchall():
+                ohlcv_tickers.add(row[0])
+            _db_conn.close()
+            # From trigger results
+            trigger_results_file = f"trigger_results_{mode}_{datetime.now().strftime('%Y%m%d')}.json"
+            if os.path.exists(trigger_results_file):
+                with open(trigger_results_file, 'r', encoding='utf-8') as f:
+                    tr_data = json.load(f)
+                for key, value in tr_data.items():
+                    if key != "metadata" and isinstance(value, list):
+                        for stock in value:
+                            if isinstance(stock, dict) and "code" in stock:
+                                ohlcv_tickers.add(stock["code"])
+            # Fetch per-stock OHLCV (90 days)
+            today_str = dt.datetime.now().strftime("%Y%m%d")
+            start_90d = (dt.datetime.now() - dt.timedelta(days=90)).strftime("%Y%m%d")
+            for tk in ohlcv_tickers:
+                try:
+                    ohlcv_df = get_ohlcv_by_date_range(start_90d, today_str, tk)
+                    if ohlcv_df is not None and not ohlcv_df.empty:
+                        self._tracking_prefetched_per_stock_ohlcv[tk] = ohlcv_df
+                except Exception as tk_err:
+                    logger.warning(f"Phase 0-B: Per-stock OHLCV fetch failed for {tk}: {tk_err}")
+
+            logger.info(f"Phase 0-B: Pre-fetched per-stock OHLCV for {len(self._tracking_prefetched_per_stock_ohlcv)}/{len(ohlcv_tickers)} stocks")
+
+        except Exception as tracking_prefetch_err:
+            logger.warning(f"Phase 0-B: Tracking data pre-fetch failed (will fallback to direct KRX): {tracking_prefetch_err}")
+
         logger.info(f"Phase 0 complete: All KRX data and charts pre-fetched for {len(tickers)} stocks")
 
         # === Phase 1: Run MCP agent analysis for each stock ===
         # No KRX calls from main process during this phase
         for idx, ticker_info in enumerate(tickers, 1):
-            # If ticker_info is a dict
-            if isinstance(ticker_info, dict):
-                ticker = ticker_info.get('code')
-                # Use 'or' to handle both None and empty string cases
-                company_name = ticker_info.get('name') or f"Stock_{ticker}"
-            else:
-                ticker = ticker_info
-                company_name = f"Stock_{ticker}"
+            ticker, company_name = _resolve_company_name(ticker_info)
 
             logger.info(f"[{idx}/{len(tickers)}] Starting stock analysis: {company_name}({ticker})")
 
