@@ -821,7 +821,7 @@ class USStockAnalysisOrchestrator:
                 try:
                     logger.info("Starting US stock tracking system batch execution")
 
-                    from us_stock_tracking_agent import USStockTrackingAgent, app as tracking_app
+                    from us_stock_tracking_agent import USStockTrackingAgent
 
                     if self.telegram_config.use_telegram:
                         try:
@@ -833,25 +833,24 @@ class USStockAnalysisOrchestrator:
 
                     self.telegram_config.log_status()
 
-                    async with tracking_app.run():
-                        tracking_agent = USStockTrackingAgent(
-                            telegram_token=self.telegram_config.bot_token if self.telegram_config.use_telegram else None
-                        )
+                    tracking_agent = USStockTrackingAgent(
+                        telegram_token=self.telegram_config.bot_token if self.telegram_config.use_telegram else None
+                    )
 
-                        # Use main channel (Korean) by default - same as Korean stock version
-                        chat_id = self.telegram_config.channel_id if self.telegram_config.use_telegram else None
+                    # Use main channel (Korean) by default - same as Korean stock version
+                    chat_id = self.telegram_config.channel_id if self.telegram_config.use_telegram else None
 
-                        trigger_results_file = f"trigger_results_us_{mode}_{datetime.now().strftime('%Y%m%d')}.json"
-                        tracking_success = await tracking_agent.run(
-                            pdf_paths, chat_id, language,
-                            telegram_config=self.telegram_config,
-                            trigger_results_file=trigger_results_file
-                        )
+                    trigger_results_file = f"trigger_results_us_{mode}_{datetime.now().strftime('%Y%m%d')}.json"
+                    tracking_success = await tracking_agent.run(
+                        pdf_paths, chat_id, language,
+                        telegram_config=self.telegram_config,
+                        trigger_results_file=trigger_results_file
+                    )
 
-                        if tracking_success:
-                            logger.info("US tracking system batch execution complete")
-                        else:
-                            logger.error("US tracking system batch execution failed")
+                    if tracking_success:
+                        logger.info("US tracking system batch execution complete")
+                    else:
+                        logger.error("US tracking system batch execution failed")
 
                 except Exception as e:
                     logger.error(f"Error during US tracking system batch execution: {str(e)}")

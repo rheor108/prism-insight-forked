@@ -51,9 +51,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# MCP related imports
-from mcp_agent.app import MCPApp
-
 # LLM adapter (Claude Code bridge) - deferred import via _import_from_main_cores
 # to avoid namespace collision with prism-us/cores/
 ClaudeCodeLLM = None  # Initialized after _import_from_main_cores is defined
@@ -105,7 +102,7 @@ translate_telegram_message = _translator_module.translate_telegram_message
 
 try:
     # First try direct import from prism-us directory
-    from cores.agents.trading_agents import create_us_trading_scenario_agent
+    from cores.agents.trading_agents import create_us_trading_scenario_agent, create_us_sell_decision_agent
     from tracking.db_schema import (
         create_us_tables,
         create_us_indexes,
@@ -124,7 +121,7 @@ except ImportError as e:
     _prism_us_fallback = Path(__file__).parent
     if str(_prism_us_fallback) not in sys.path:
         sys.path.insert(0, str(_prism_us_fallback))
-    from cores.agents.trading_agents import create_us_trading_scenario_agent
+    from cores.agents.trading_agents import create_us_trading_scenario_agent, create_us_sell_decision_agent
     from tracking.db_schema import (
         create_us_tables,
         create_us_indexes,
@@ -138,8 +135,6 @@ except ImportError as e:
     from tracking.journal import USJournalManager
     from tracking.compression import USCompressionManager
 
-# Create MCPApp instance
-app = MCPApp(name="us_stock_tracking")
 
 
 # =============================================================================
@@ -455,6 +450,9 @@ class USStockTrackingAgent:
         # Initialize trading scenario agent for US
         self.trading_agent = create_us_trading_scenario_agent(language=language)
 
+        # Initialize sell decision agent for AI-based holding analysis
+        self.sell_decision_agent = create_us_sell_decision_agent(language=language)
+
         # Create US database tables
         await self._create_tables()
 
@@ -615,7 +613,15 @@ class USStockTrackingAgent:
                 """
 
             # LLM call to generate trading scenario
-            llm = ClaudeCodeLLM(instruction=self.trading_agent.instruction, server_names=getattr(self.trading_agent, 'server_names', []))
+            # Use a focused instruction for JSON extraction only (no MCP tools needed).
+            # The report_content already contains all analysis data, so max_turns=1 suffices.
+            scenario_instruction = (
+                self.trading_agent.instruction
+                + "\n\nIMPORTANT: All data you need is provided in the report below. "
+                "Do NOT use any external tools or MCP servers. "
+                "Respond ONLY with a single JSON object. No explanation, no markdown fences."
+            )
+            llm = ClaudeCodeLLM(instruction=scenario_instruction, server_names=[], max_turns=1)
 
             # Build trigger info section
             trigger_info_section = ""
@@ -626,12 +632,22 @@ class USStockTrackingAgent:
                 - **Trigger Mode**: {trigger_mode or 'unknown'}
                 """
 
+            # Build sector info section
+            sector_info_section = ""
+            if sector:
+                sector_info_section = f"""
+                ### Stock Sector (GICS)
+                - **Sector**: {sector}
+                - Use this as the "sector" field in your JSON response.
+                """
+
             prompt_message = f"""
             This is an AI analysis report for a US stock. Please generate a trading scenario based on this report.
 
             ### Current Portfolio Status:
             {portfolio_info}
             {trigger_info_section}
+            {sector_info_section}
             ### Trading Value Analysis:
             {rank_change_msg}
             {score_adjustment_info}
@@ -745,17 +761,31 @@ class USStockTrackingAgent:
             trigger_type = trigger_info.get('trigger_type', '')
             trigger_mode = trigger_info.get('trigger_mode', '')
 
+            # Fetch sector from yfinance
+            sector = None
+            try:
+                import yfinance as yf
+                stock = yf.Ticker(ticker)
+                sector = stock.info.get("sector", None)
+                if sector:
+                    logger.info(f"{ticker} sector from yfinance: {sector}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch sector for {ticker}: {e}")
+
             # Extract trading scenario
             scenario = await self._extract_trading_scenario(
                 report_content,
                 rank_change_msg,
                 ticker=ticker,
-                sector=None,
+                sector=sector,
                 trigger_type=trigger_type,
                 trigger_mode=trigger_mode
             )
 
-            # Check sector diversity
+            # Override scenario sector with yfinance data if LLM returned Unknown
+            scenario_sector = scenario.get("sector", "Unknown")
+            if (not scenario_sector or scenario_sector == "Unknown") and sector:
+                scenario["sector"] = sector
             sector = scenario.get("sector", "Unknown")
             is_sector_diverse = await self._check_sector_diversity(sector)
 
@@ -1108,7 +1138,7 @@ class USStockTrackingAgent:
 
     async def _analyze_sell_decision(self, stock_data: Dict[str, Any]) -> Tuple[bool, str]:
         """
-        Sell decision analysis.
+        AI agent-based sell decision analysis for US holdings.
 
         Args:
             stock_data: Stock information
@@ -1118,6 +1148,7 @@ class USStockTrackingAgent:
         """
         try:
             ticker = stock_data.get('ticker', '')
+            company_name = stock_data.get('company_name', '')
             buy_price = stock_data.get('buy_price', 0)
             buy_date = stock_data.get('buy_date', '')
             current_price = stock_data.get('current_price', 0)
@@ -1133,8 +1164,235 @@ class USStockTrackingAgent:
 
             # Extract scenario information
             scenario_str = stock_data.get('scenario', '{}')
-            investment_period = "medium"
+            period = "medium"
+            sector = "Unknown"
+            trading_scenarios = {}
 
+            try:
+                if isinstance(scenario_str, str):
+                    scenario_data = json.loads(scenario_str)
+                    period = scenario_data.get('investment_period', 'medium')
+                    sector = scenario_data.get('sector', 'Unknown')
+                    trading_scenarios = scenario_data.get('trading_scenarios', {})
+            except:
+                pass
+
+            # Collect current portfolio information
+            self.cursor.execute("""
+                SELECT ticker, company_name, buy_price, current_price, scenario
+                FROM us_stock_holdings
+            """)
+            holdings = [dict(row) for row in self.cursor.fetchall()]
+
+            # Analyze sector distribution
+            sector_distribution = {}
+            investment_periods = {"short": 0, "medium": 0, "long": 0}
+
+            for holding in holdings:
+                holding_scenario_str = holding.get('scenario', '{}')
+                try:
+                    if isinstance(holding_scenario_str, str):
+                        holding_scenario = json.loads(holding_scenario_str)
+                    else:
+                        holding_scenario = holding_scenario_str
+                    holding_sector = holding_scenario.get('sector', 'Other')
+                    sector_distribution[holding_sector] = sector_distribution.get(holding_sector, 0) + 1
+                    holding_period = holding_scenario.get('investment_period', 'medium')
+                    investment_periods[holding_period] = investment_periods.get(holding_period, 0) + 1
+                except:
+                    sector_distribution['Other'] = sector_distribution.get('Other', 0) + 1
+                    investment_periods['medium'] = investment_periods.get('medium', 0) + 1
+
+            portfolio_info = f"""
+            Current Holdings: {len(holdings)}/{self.max_slots}
+            Sector Distribution: {json.dumps(sector_distribution, ensure_ascii=False)}
+            Investment Period Distribution: {json.dumps(investment_periods, ensure_ascii=False)}
+            """
+
+            logger.info(f"[_analyze_sell_decision] {ticker}({company_name}) portfolio_info:")
+            logger.info(f"  - Holdings count: {len(holdings)}/{self.max_slots}")
+            logger.info(f"  - Sector distribution: {json.dumps(sector_distribution, ensure_ascii=False)}")
+
+            # LLM call to generate sell decision
+            llm = ClaudeCodeLLM(
+                instruction=self.sell_decision_agent.instruction,
+                server_names=getattr(self.sell_decision_agent, 'server_names', [])
+            )
+
+            if self.language == "ko":
+                prompt_message = f"""
+                다음 보유 종목에 대한 매도 의사결정을 수행해주세요.
+
+                ### 종목 기본 정보:
+                - 종목명: {company_name}({ticker})
+                - 매수가: ${buy_price:,.2f}
+                - 현재가: ${current_price:,.2f}
+                - 목표가: ${target_price:,.2f}
+                - 손절가: ${stop_loss:,.2f}
+                - 수익률: {profit_rate:.2f}%
+                - 보유기간: {days_passed}일
+                - 투자기간: {period}
+                - 섹터: {sector}
+
+                ### 현재 포트폴리오 상황:
+                {portfolio_info}
+
+                ### 매매 시나리오 정보:
+                {json.dumps(trading_scenarios, ensure_ascii=False) if trading_scenarios else "시나리오 정보 없음"}
+
+                ### 분석 요청:
+                위 정보를 바탕으로 yahoo_finance와 sqlite 도구를 활용하여 최신 데이터를 확인하고,
+                매도할지 계속 보유할지 결정해주세요.
+                """
+            else:
+                prompt_message = f"""
+                Please make a sell decision for the following holding.
+
+                ### Stock Basic Information:
+                - Stock: {company_name}({ticker})
+                - Buy Price: ${buy_price:,.2f}
+                - Current Price: ${current_price:,.2f}
+                - Target Price: ${target_price:,.2f}
+                - Stop Loss: ${stop_loss:,.2f}
+                - Return: {profit_rate:.2f}%
+                - Holding Period: {days_passed} days
+                - Investment Period: {period}
+                - Sector: {sector}
+
+                ### Current Portfolio Status:
+                {portfolio_info}
+
+                ### Trading Scenario Information:
+                {json.dumps(trading_scenarios, ensure_ascii=False) if trading_scenarios else "No scenario information"}
+
+                ### Analysis Request:
+                Based on the above information, use the yahoo_finance and sqlite tools to check the latest data,
+                and decide whether to sell or continue holding.
+                """
+
+            response = await llm.generate_str(message=prompt_message)
+
+            # JSON parsing
+            try:
+                if not response or not response.strip():
+                    logger.warning(f"{ticker} Empty response from LLM, falling back to rule-based")
+                    return await self._fallback_sell_decision(stock_data)
+
+                decision_json = None
+                json_str = None
+
+                # 1. Try extracting JSON from markdown code block
+                markdown_match = re.search(r'```(?:json)?\s*({[\s\S]*?})\s*```', response, re.DOTALL)
+                if markdown_match:
+                    json_str = markdown_match.group(1)
+
+                # 2. Try extracting complete JSON object with nested braces
+                if not json_str:
+                    json_match = re.search(r'(\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})', response, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(1)
+
+                # 3. If entire response is JSON
+                if not json_str:
+                    clean_response = response.strip()
+                    if clean_response.startswith('{') and clean_response.endswith('}'):
+                        json_str = clean_response
+
+                if not json_str:
+                    logger.warning(f"{ticker} No JSON found in response, falling back to rule-based")
+                    return await self._fallback_sell_decision(stock_data)
+
+                # Remove trailing commas
+                json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+
+                try:
+                    decision_json = json.loads(json_str)
+                except json.JSONDecodeError:
+                    json_str_cleaned = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', json_str)
+                    decision_json = json.loads(json_str_cleaned)
+
+                logger.info(f"US sell decision parsed: {json.dumps(decision_json, ensure_ascii=False)[:500]}")
+
+                should_sell = decision_json.get("should_sell", False)
+                sell_reason = decision_json.get("sell_reason", "AI analysis result")
+                confidence = decision_json.get("confidence", 5)
+                analysis_summary = decision_json.get("analysis_summary", {})
+                portfolio_adjustment = decision_json.get("portfolio_adjustment", {})
+
+                logger.info(f"{ticker}({company_name}) AI sell decision: {'Sell' if should_sell else 'Hold'} (Confidence: {confidence}/10)")
+
+                # DB processing
+                try:
+                    if should_sell:
+                        await self._delete_holding_decision(ticker)
+
+                        if analysis_summary:
+                            detailed_reason = sell_reason
+                            detailed_reason += "\n\n📊 Detailed Analysis:"
+                            if analysis_summary.get('technical_trend'):
+                                detailed_reason += f"\n• Technical Trend: {analysis_summary['technical_trend']}"
+                            if analysis_summary.get('volume_analysis'):
+                                detailed_reason += f"\n• Volume Analysis: {analysis_summary['volume_analysis']}"
+                            if analysis_summary.get('market_condition_impact'):
+                                detailed_reason += f"\n• Market Condition: {analysis_summary['market_condition_impact']}"
+                            if analysis_summary.get('time_factor'):
+                                detailed_reason += f"\n• Time Factor: {analysis_summary['time_factor']}"
+                            return should_sell, detailed_reason
+                    else:
+                        await self._save_holding_decision(ticker, current_price, decision_json)
+
+                        # Process portfolio_adjustment if needed
+                        if portfolio_adjustment.get("needed", False):
+                            new_tp = portfolio_adjustment.get("new_target_price")
+                            new_sl = portfolio_adjustment.get("new_stop_loss")
+                            if new_tp or new_sl:
+                                update_parts = []
+                                update_vals = []
+                                if new_tp and isinstance(new_tp, (int, float)) and new_tp > 0:
+                                    update_parts.append("target_price = ?")
+                                    update_vals.append(float(new_tp))
+                                if new_sl and isinstance(new_sl, (int, float)) and new_sl > 0:
+                                    update_parts.append("stop_loss = ?")
+                                    update_vals.append(float(new_sl))
+                                if update_parts:
+                                    update_vals.append(ticker)
+                                    self.cursor.execute(
+                                        f"UPDATE us_stock_holdings SET {', '.join(update_parts)} WHERE ticker = ?",
+                                        update_vals
+                                    )
+                                    self.conn.commit()
+                                    logger.info(f"{ticker} Portfolio adjustment applied: {portfolio_adjustment}")
+                except Exception as db_err:
+                    logger.error(f"{ticker} Error processing holding_decisions DB (main flow continues): {db_err}")
+
+                return should_sell, sell_reason
+
+            except Exception as json_err:
+                logger.error(f"US sell decision JSON parse error: {json_err}")
+                logger.warning(f"{ticker} AI analysis failed, falling back to rule-based")
+                return await self._fallback_sell_decision(stock_data)
+
+        except Exception as e:
+            logger.error(f"{ticker} Error in AI sell analysis: {str(e)}")
+            logger.error(traceback.format_exc())
+            return await self._fallback_sell_decision(stock_data)
+
+    async def _fallback_sell_decision(self, stock_data: Dict[str, Any]) -> Tuple[bool, str]:
+        """Rule-based sell decision (fallback when AI analysis fails)."""
+        try:
+            ticker = stock_data.get('ticker', '')
+            buy_price = stock_data.get('buy_price', 0)
+            buy_date = stock_data.get('buy_date', '')
+            current_price = stock_data.get('current_price', 0)
+            target_price = stock_data.get('target_price', 0)
+            stop_loss = stock_data.get('stop_loss', 0)
+
+            profit_rate = ((current_price - buy_price) / buy_price) * 100 if buy_price > 0 else 0
+            buy_datetime = datetime.strptime(buy_date, "%Y-%m-%d %H:%M:%S")
+            days_passed = (datetime.now() - buy_datetime).days
+
+            scenario_str = stock_data.get('scenario', '{}')
+            investment_period = "medium"
             try:
                 if isinstance(scenario_str, str):
                     scenario_data = json.loads(scenario_str)
@@ -1142,58 +1400,48 @@ class USStockTrackingAgent:
             except:
                 pass
 
-            # Check stop-loss condition (same format as KR template)
             if stop_loss > 0 and current_price <= stop_loss:
                 return True, f"Stop-loss condition reached (stop-loss: ${stop_loss:,.2f})"
-
-            # Check target price reached
             if target_price > 0 and current_price >= target_price:
                 return True, f"Target price achieved (target: ${target_price:,.2f})"
-
-            # Sell conditions by investment period
             if investment_period == "short":
-                # Short-term investment: quicker sell (15+ days holding + 5%+ profit)
                 if days_passed >= 15 and profit_rate >= 5:
-                    return True, f"Short-term investment goal achieved (holding: {days_passed} days, return: {profit_rate:.2f}%)"
-                # Short-term investment loss protection (10+ days + 3%+ loss)
+                    return True, f"Short-term goal achieved (holding: {days_passed}d, return: {profit_rate:.2f}%)"
                 if days_passed >= 10 and profit_rate <= -3:
-                    return True, f"Short-term investment loss protection (holding: {days_passed} days, return: {profit_rate:.2f}%)"
-
-            # General sell conditions
-            # Sell if profit >= 10%
+                    return True, f"Short-term loss protection (holding: {days_passed}d, return: {profit_rate:.2f}%)"
             if profit_rate >= 10:
-                return True, f"Return exceeds 10% (current return: {profit_rate:.2f}%)"
-
-            # Sell if loss >= 5%
+                return True, f"Return exceeds 10% ({profit_rate:.2f}%)"
             if profit_rate <= -5:
-                return True, f"Loss exceeds -5% (current return: {profit_rate:.2f}%)"
-
-            # Sell if holding 30+ days with loss
+                return True, f"Loss exceeds -5% ({profit_rate:.2f}%)"
             if days_passed >= 30 and profit_rate < 0:
-                return True, f"Held 30+ days with loss (holding: {days_passed} days, return: {profit_rate:.2f}%)"
-
-            # Sell if holding 60+ days with 3%+ profit
+                return True, f"Held 30+ days with loss ({days_passed}d, {profit_rate:.2f}%)"
             if days_passed >= 60 and profit_rate >= 3:
-                return True, f"Held 60+ days with 3%+ profit (holding: {days_passed} days, return: {profit_rate:.2f}%)"
-
-            # Long-term investment case (90+ days holding + loss)
+                return True, f"Held 60+ days with profit ({days_passed}d, {profit_rate:.2f}%)"
             if investment_period == "long" and days_passed >= 90 and profit_rate < 0:
-                return True, f"Long-term investment loss cleanup (holding: {days_passed} days, return: {profit_rate:.2f}%)"
+                return True, f"Long-term loss cleanup ({days_passed}d, {profit_rate:.2f}%)"
 
-            # Continue holding by default
             return False, "Continue holding"
 
         except Exception as e:
-            logger.error(f"Error analyzing sell decision: {str(e)}")
+            logger.error(f"Error in fallback sell decision: {str(e)}")
             return False, "Analysis error"
+
+    def _safe_number_conversion(self, value) -> float:
+        """Safely convert value to float, handling None, strings, etc."""
+        if value is None:
+            return 0.0
+        try:
+            if isinstance(value, str):
+                value = value.replace(',', '').replace('$', '').replace('원', '').strip()
+            return float(value)
+        except (ValueError, TypeError):
+            return 0.0
 
     async def _save_holding_decision(
         self,
         ticker: str,
         current_price: float,
-        should_sell: bool,
-        sell_reason: str,
-        stock_data: Dict[str, Any]
+        decision_json: Dict[str, Any]
     ) -> bool:
         """
         Save AI sell decision results for held stocks to us_holding_decisions table.
@@ -1202,9 +1450,7 @@ class USStockTrackingAgent:
         Args:
             ticker: Stock ticker
             current_price: Current price
-            should_sell: Whether to sell
-            sell_reason: Reason for decision
-            stock_data: Full stock data for context
+            decision_json: AI decision result JSON
 
         Returns:
             bool: Save success status
@@ -1214,31 +1460,23 @@ class USStockTrackingAgent:
             decision_date = now.strftime("%Y-%m-%d")
             decision_time = now.strftime("%H:%M:%S")
 
-            # Build decision JSON for storage
-            buy_price = stock_data.get('buy_price', 0)
-            profit_rate = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
+            # Extract data from JSON
+            should_sell = decision_json.get("should_sell", False)
+            sell_reason = decision_json.get("sell_reason", "")
+            confidence = decision_json.get("confidence", 0)
 
-            decision_json = {
-                "should_sell": should_sell,
-                "sell_reason": sell_reason,
-                "confidence": 7 if should_sell else 5,  # Rule-based confidence
-                "analysis_summary": {
-                    "technical_trend": "Rule-based analysis",
-                    "volume_analysis": "",
-                    "market_condition_impact": "",
-                    "time_factor": f"Holding days: {stock_data.get('holding_days', 0)}"
-                },
-                "portfolio_adjustment": {
-                    "needed": False,
-                    "reason": "",
-                    "new_target_price": stock_data.get('target_price'),
-                    "new_stop_loss": stock_data.get('stop_loss'),
-                    "urgency": "low"
-                },
-                "current_price": current_price,
-                "buy_price": buy_price,
-                "profit_rate": profit_rate
-            }
+            analysis_summary = decision_json.get("analysis_summary", {})
+            technical_trend = analysis_summary.get("technical_trend", "")
+            volume_analysis = analysis_summary.get("volume_analysis", "")
+            market_condition_impact = analysis_summary.get("market_condition_impact", "")
+            time_factor = analysis_summary.get("time_factor", "")
+
+            portfolio_adjustment = decision_json.get("portfolio_adjustment", {})
+            adjustment_needed = portfolio_adjustment.get("needed", False)
+            adjustment_reason = portfolio_adjustment.get("reason", "")
+            new_target_price = self._safe_number_conversion(portfolio_adjustment.get("new_target_price"))
+            new_stop_loss = self._safe_number_conversion(portfolio_adjustment.get("new_stop_loss"))
+            adjustment_urgency = portfolio_adjustment.get("urgency", "low")
 
             full_json_data = json.dumps(decision_json, ensure_ascii=False)
 
@@ -1256,21 +1494,14 @@ class USStockTrackingAgent:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 ticker, decision_date, decision_time, current_price, should_sell,
-                sell_reason, decision_json.get("confidence", 5),
-                decision_json["analysis_summary"]["technical_trend"],
-                decision_json["analysis_summary"]["volume_analysis"],
-                decision_json["analysis_summary"]["market_condition_impact"],
-                decision_json["analysis_summary"]["time_factor"],
-                decision_json["portfolio_adjustment"]["needed"],
-                decision_json["portfolio_adjustment"]["reason"],
-                decision_json["portfolio_adjustment"]["new_target_price"],
-                decision_json["portfolio_adjustment"]["new_stop_loss"],
-                decision_json["portfolio_adjustment"]["urgency"],
+                sell_reason, confidence, technical_trend, volume_analysis,
+                market_condition_impact, time_factor, adjustment_needed,
+                adjustment_reason, new_target_price, new_stop_loss, adjustment_urgency,
                 full_json_data
             ))
 
             self.conn.commit()
-            logger.info(f"{ticker} US holding decision saved - should_sell: {should_sell}")
+            logger.info(f"{ticker} US holding decision saved - should_sell: {should_sell}, confidence: {confidence}")
             return True
 
         except Exception as e:
@@ -1507,9 +1738,7 @@ class USStockTrackingAgent:
                             "reason": sell_reason
                         })
                 else:
-                    # Save holding decision when not selling
-                    await self._save_holding_decision(ticker, current_price, should_sell, sell_reason, stock)
-
+                    # Holding decision already saved inside _analyze_sell_decision
                     # Update current price
                     self.cursor.execute(
                         """UPDATE us_stock_holdings
@@ -2305,13 +2534,12 @@ async def main():
         logger.error("Report path not specified")
         return False
 
-    async with app.run():
-        agent = USStockTrackingAgent(
-            telegram_token=args.telegram_token,
-            enable_journal=args.enable_journal
-        )
-        success = await agent.run(args.reports, args.chat_id, args.language)
-        return success
+    agent = USStockTrackingAgent(
+        telegram_token=args.telegram_token,
+        enable_journal=args.enable_journal
+    )
+    success = await agent.run(args.reports, args.chat_id, args.language)
+    return success
 
 
 if __name__ == "__main__":

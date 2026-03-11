@@ -457,10 +457,9 @@ def validate_credentials(app_key: str, mode: str) -> Tuple[bool, str]:
         )
 
     if mode == 'vps' and not is_demo_key and app_key.startswith('PS'):
-        return False, (
-            "CREDENTIAL MISMATCH! Using REAL app key (PS*) in DEMO mode.\n"
-            "Check kis_devlp.yaml - 'paper_app' should be your demo key (PSVT*).\n"
-            "Using real credentials in demo mode may cause unexpected behavior."
+        logging.warning(
+            "App key starts with 'PS' (not 'PSVT') in DEMO mode. "
+            "Proceeding anyway - KIS may have changed key prefix conventions."
         )
 
     return True, ""

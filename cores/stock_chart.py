@@ -402,17 +402,72 @@ def create_mpf_style(base_mpl_style='seaborn-v0_8-whitegrid'):
 
     return s
 
-# Import functions from krx_data_client (pykrx compatible)
-from krx_data_client import (
-    get_market_ohlcv_by_date,
-    get_market_cap_by_date,
-    get_market_fundamental_by_date,
-    get_market_trading_volume_by_investor,
-    get_market_trading_value_by_investor,
-    get_market_trading_volume_by_date,
-    get_market_trading_value_by_date,
-    get_market_ticker_name
-)
+# KRX data access functions
+# Use kospi_kosdaq_stock_server to share the same KRX session with data_prefetch,
+# avoiding session conflicts from multiple KRX logins (KRX allows only one active session per account).
+# Falls back to direct krx_data_client import if kospi_kosdaq_stock_server is unavailable.
+
+def _dict_to_dataframe(data: dict) -> pd.DataFrame:
+    """Convert kospi_kosdaq_stock_server Dict response back to pandas DataFrame."""
+    if not data or "error" in data:
+        return pd.DataFrame()
+    df = pd.DataFrame.from_dict(data, orient='index')
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
+    return df
+
+try:
+    from kospi_kosdaq_stock_server import (
+        get_stock_ohlcv as _server_get_ohlcv,
+        get_stock_market_cap as _server_get_market_cap,
+        get_stock_fundamental as _server_get_fundamental,
+        get_stock_trading_volume as _server_get_trading_volume,
+        load_all_tickers as _server_load_all_tickers,
+    )
+
+    def get_market_ohlcv_by_date(fromdate, todate, ticker, adjusted=True):
+        return _dict_to_dataframe(_server_get_ohlcv(fromdate, todate, ticker, adjusted=adjusted))
+
+    def get_market_cap_by_date(fromdate, todate, ticker):
+        return _dict_to_dataframe(_server_get_market_cap(fromdate, todate, ticker))
+
+    def get_market_fundamental_by_date(fromdate, todate, ticker):
+        return _dict_to_dataframe(_server_get_fundamental(fromdate, todate, ticker))
+
+    def get_market_trading_volume_by_investor(fromdate, todate, ticker, detail=False):
+        return _dict_to_dataframe(_server_get_trading_volume(fromdate, todate, ticker, detail=detail))
+
+    def get_market_trading_value_by_investor(fromdate, todate, ticker, detail=False):
+        return _dict_to_dataframe(_server_get_trading_volume(fromdate, todate, ticker, detail=detail))
+
+    def get_market_trading_volume_by_date(fromdate, todate, ticker, detail=False):
+        return _dict_to_dataframe(_server_get_trading_volume(fromdate, todate, ticker, detail=detail))
+
+    def get_market_trading_value_by_date(fromdate, todate, ticker, on="순매수"):
+        return _dict_to_dataframe(_server_get_trading_volume(fromdate, todate, ticker))
+
+    def get_market_ticker_name(ticker):
+        tickers = _server_load_all_tickers()
+        if not tickers or "error" in tickers:
+            return ""
+        return tickers.get(str(ticker).zfill(6), "")
+
+    logger.info("Using kospi_kosdaq_stock_server for KRX data (shared session)")
+
+except ImportError:
+    # Fallback: direct krx_data_client import (may cause session conflicts if used
+    # alongside kospi_kosdaq_stock_server in the same process)
+    from krx_data_client import (
+        get_market_ohlcv_by_date,
+        get_market_cap_by_date,
+        get_market_fundamental_by_date,
+        get_market_trading_volume_by_investor,
+        get_market_trading_value_by_investor,
+        get_market_trading_volume_by_date,
+        get_market_trading_value_by_date,
+        get_market_ticker_name
+    )
+    logger.warning("kospi_kosdaq_stock_server not available, falling back to direct krx_data_client")
 
 # Professional chart style configuration
 sns.set_context("paper", font_scale=1.2)

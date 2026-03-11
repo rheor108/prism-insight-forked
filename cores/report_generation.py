@@ -47,7 +47,10 @@ async def generate_report(agent, section, company_name, company_code, reference_
     """
     language_name = LANGUAGE_NAMES.get(language, language.upper())
 
-    llm = ClaudeCodeLLM(instruction=agent.instruction, server_names=getattr(agent, 'server_names', []))
+    server_names = getattr(agent, 'server_names', [])
+    # Sections using MCP tools (perplexity, firecrawl, etc.) need more turns
+    max_turns = 8 if server_names else 1
+    llm = ClaudeCodeLLM(instruction=agent.instruction, server_names=server_names, max_turns=max_turns)
 
     # Create language-specific message
     if language == "ko":
@@ -128,7 +131,9 @@ async def generate_market_report(agent, section, reference_date, logger, languag
     """
     language_name = LANGUAGE_NAMES.get(language, language.upper())
 
-    llm = ClaudeCodeLLM(instruction=agent.instruction, server_names=getattr(agent, 'server_names', []))
+    server_names = getattr(agent, 'server_names', [])
+    max_turns = 8 if server_names else 1
+    llm = ClaudeCodeLLM(instruction=agent.instruction, server_names=server_names, max_turns=max_turns)
 
     # Create language-specific message
     if language == "ko":

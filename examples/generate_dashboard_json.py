@@ -113,7 +113,11 @@ class DashboardDataGenerator:
         if not KIS_AVAILABLE:
             logger.warning("한국투자증권 API를 사용할 수 없습니다.")
             return {"portfolio": [], "account_summary": {}}
-        
+
+        if self.trading_mode == "demo":
+            logger.info("모의투자 모드 - 실전투자 데이터 조회 생략")
+            return {"portfolio": [], "account_summary": {}}
+
         try:
             logger.info(f"한국투자증권 데이터 조회 중... (모드: {self.trading_mode})")
             trader = DomesticStockTrading(mode=self.trading_mode)

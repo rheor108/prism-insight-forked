@@ -14,7 +14,7 @@ Key Features:
 from mcp_agent.agents.agent import Agent
 
 
-def create_trading_journal_agent(language: str = "ko"):
+def create_trading_journal_agent(language: str = "ko", market: str = "KR"):
     """
     Create trading journal retrospective agent.
 
@@ -26,10 +26,13 @@ def create_trading_journal_agent(language: str = "ko"):
 
     Args:
         language: Language code ("ko" or "en")
+        market: Market code ("KR" or "US")
 
     Returns:
         Agent: Trading journal agent
     """
+
+    market_index = "KOSPI/KOSDAQ" if market == "KR" else "S&P 500/NASDAQ"
 
     if language == "en":
         instruction = """## 🎯 Your Identity
@@ -217,6 +220,9 @@ def create_trading_journal_agent(language: str = "ko"):
            - **medium**: 섹터/시장상황별 교훈
            - **low**: 종목 특화 관찰
         """
+
+    if market == "US":
+        instruction = instruction.replace("KOSPI/KOSDAQ", market_index)
 
     return Agent(
         name="trading_journal_agent",

@@ -15,12 +15,26 @@ Usage:
 import asyncio
 import logging
 import os
+import shutil
 from asyncio.subprocess import PIPE
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = str(Path(__file__).parent.parent)
+
+# Resolve claude binary path at module load time
+# Priority: 1) CLAUDE_BIN env var 2) ~seungbum/.local/bin/claude 3) PATH lookup
+_CLAUDE_BIN = os.environ.get("CLAUDE_BIN")
+if not _CLAUDE_BIN:
+    _candidate = Path("/home/seungbum/.local/bin/claude")
+    if _candidate.exists():
+        _CLAUDE_BIN = str(_candidate)
+    else:
+        _CLAUDE_BIN = shutil.which("claude") or "claude"
+
+# Ensure HOME points to seungbum's home for .claude.json auth config
+_CLAUDE_HOME = os.environ.get("CLAUDE_HOME", "/home/seungbum")
 
 
 async def claude_generate(
@@ -48,7 +62,7 @@ async def claude_generate(
         RuntimeError: If the subprocess returns non-zero exit code
     """
     cmd = [
-        "claude", "-p",
+        _CLAUDE_BIN, "-p",
         "--model", model,
         "--output-format", "text",
         "--max-turns", str(max_turns),
@@ -58,7 +72,12 @@ async def claude_generate(
         cmd.extend(["--system-prompt", system_prompt])
 
     logger.info(f"claude -p call: model={model}, max_turns={max_turns}, "
-                f"prompt_len={len(user_message)}")
+                f"prompt_len={len(user_message)}, bin={_CLAUDE_BIN}")
+
+    # Build env with correct HOME so claude picks up ~/.claude.json
+    env = os.environ.copy()
+    env["HOME"] = _CLAUDE_HOME
+    env.pop("CLAUDECODE", None)  # Allow subprocess even inside a Claude Code session
 
     try:
         process = await asyncio.create_subprocess_exec(
@@ -67,6 +86,7 @@ async def claude_generate(
             stdout=PIPE,
             stderr=PIPE,
             cwd=PROJECT_ROOT,
+            env=env,
         )
 
         stdout, stderr = await asyncio.wait_for(

@@ -118,6 +118,10 @@ class USDashboardDataGenerator:
             logger.warning("KIS US Stock Trading API not available.")
             return {"portfolio": [], "account_summary": {}}
 
+        if self.trading_mode == "demo":
+            logger.info("Demo mode - skipping real trading data fetch")
+            return {"portfolio": [], "account_summary": {}}
+
         try:
             logger.info(f"Fetching KIS US trading data... (mode: {self.trading_mode})")
             trader = USStockTrading(mode=self.trading_mode)

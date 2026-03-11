@@ -48,20 +48,29 @@ def extract_ticker_info(report_path: str) -> Tuple[str, str]:
         return "", ""
 
 
-async def get_current_stock_price(cursor, ticker: str) -> float:
+async def get_current_stock_price(cursor, ticker: str, price_cache: dict = None) -> float:
     """
     Get current stock price.
 
     Args:
         cursor: SQLite cursor
         ticker: Stock code
+        price_cache: Pre-fetched price dict {ticker: price} to avoid KRX calls (optional)
 
     Returns:
         float: Current stock price
     """
+    # Use cached price if available (avoids KRX session conflict)
+    if price_cache and ticker in price_cache:
+        cached_price = float(price_cache[ticker])
+        logger.info(f"{ticker} current price (cached): {cached_price:,.0f} KRW")
+        return cached_price
+
     try:
         from krx_data_client import get_nearest_business_day_in_a_week, get_market_ohlcv_by_ticker
         import datetime
+
+        logger.warning(f"price_cache miss for {ticker} - falling back to direct KRX call (may cause session conflict)")
 
         today = datetime.datetime.now().strftime("%Y%m%d")
         trade_date = get_nearest_business_day_in_a_week(today, prev=True)
@@ -100,12 +109,13 @@ def _get_last_price_from_db(cursor, ticker: str) -> float:
     return 0.0
 
 
-async def get_trading_value_rank_change(ticker: str) -> Tuple[float, str]:
+async def get_trading_value_rank_change(ticker: str, ohlcv_cache: dict = None) -> Tuple[float, str]:
     """
     Calculate trading value ranking change for a stock.
 
     Args:
         ticker: Stock code
+        ohlcv_cache: Pre-fetched OHLCV DataFrames {date: DataFrame} to avoid KRX calls (optional)
 
     Returns:
         Tuple[float, str]: Ranking change percentage, analysis result message
@@ -126,8 +136,15 @@ async def get_trading_value_rank_change(ticker: str) -> Tuple[float, str]:
 
         logger.info(f"Recent trading day: {recent_date}, Previous trading day: {previous_date}")
 
-        recent_df = get_market_ohlcv_by_ticker(recent_date)
-        previous_df = get_market_ohlcv_by_ticker(previous_date)
+        # Use cached data if available
+        if ohlcv_cache and recent_date in ohlcv_cache and previous_date in ohlcv_cache:
+            recent_df = ohlcv_cache[recent_date]
+            previous_df = ohlcv_cache[previous_date]
+            logger.info(f"Using cached OHLCV data for rank change analysis")
+        else:
+            logger.warning(f"ohlcv_cache miss for {ticker} - falling back to direct KRX call (may cause session conflict)")
+            recent_df = get_market_ohlcv_by_ticker(recent_date)
+            previous_df = get_market_ohlcv_by_ticker(previous_date)
 
         # Sort by trading value to generate rankings
         recent_rank = recent_df.sort_values(by="Amount", ascending=False).reset_index()

@@ -377,7 +377,9 @@ export function TradingInsightsPage({ data, market = "KR" }: TradingInsightsPage
             <CardDescription>{t("insights.performance.description")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {data.performance_analysis.overview.completed === 0 ? (
+            {data.performance_analysis.overview.completed === 0
+              && (data.performance_analysis.actual_trading?.count ?? 0) === 0
+              && data.performance_analysis.actual_trading_by_trigger.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12">
                 <BarChart3 className="w-12 h-12 text-muted-foreground mb-4" />
                 <p className="text-muted-foreground text-center">{t("insights.performance.noData")}</p>

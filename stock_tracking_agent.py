@@ -71,9 +71,6 @@ from tracking import (
     TelegramSender,
 )
 
-# Create MCPApp instance
-app = MCPApp(name="stock_tracking")
-
 class StockTrackingAgent:
     """Stock Tracking and Trading Agent"""
 
@@ -286,7 +283,15 @@ class StockTrackingAgent:
                 """
 
             # LLM call to generate trading scenario
-            llm = ClaudeCodeLLM(instruction=self.trading_agent.instruction, server_names=getattr(self.trading_agent, 'server_names', []))
+            # Use a focused instruction for JSON extraction only (no MCP tools needed).
+            # The report_content already contains all analysis data, so max_turns=1 suffices.
+            scenario_instruction = (
+                self.trading_agent.instruction
+                + "\n\nIMPORTANT: All data you need is provided in the report below. "
+                "Do NOT use any external tools or MCP servers. "
+                "Respond ONLY with a single JSON object. No explanation, no markdown fences."
+            )
+            llm = ClaudeCodeLLM(instruction=scenario_instruction, server_names=[], max_turns=1)
 
             # Build trigger info section if available
             trigger_info_section = ""
@@ -1762,11 +1767,10 @@ async def main():
         local_logger.error("Report path not specified")
         return False
 
-    async with app.run():
-        agent = StockTrackingAgent(telegram_token=args.telegram_token)
-        success = await agent.run(args.reports, args.chat_id)
+    agent = StockTrackingAgent(telegram_token=args.telegram_token)
+    success = await agent.run(args.reports, args.chat_id)
 
-        return success
+    return success
 
 if __name__ == "__main__":
     try:
