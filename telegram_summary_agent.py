@@ -215,70 +215,29 @@ class TelegramSummaryGenerator:
         # Generate Telegram message using Claude
         response = await llm.generate_str(message=prompt_message)
 
-        # Process response - improved method
-        logger.info(f"Response type: {type(response)}")
+        logger.info(f"claude -p response length: {len(response) if response else 0} chars")
 
-        # If response is string (most ideal case)
-        if isinstance(response, str):
-            logger.info("Response is in string format.")
-            # Check if already in message format
-            if response.startswith(('📊', '📈', '📉', '💰', '⚠️', '🔍')):
-                return response
+        # claude -p --output-format text always returns a string
+        if not response or not response.strip():
+            logger.warning("Empty response from claude -p, returning default message")
+            return (
+                f"📊 {metadata['stock_name']}({metadata['stock_code']}) - 분석 요약\n\n"
+                f"⚠️ 자동 생성 오류로 상세 정보를 표시할 수 없습니다. 전체 보고서를 확인하세요.\n"
+                f"본 정보는 투자 참고용이며, 투자 결정과 책임은 투자자에게 있습니다."
+            )
 
-            # Find and remove Python object representations
-            cleaned_response = re.sub(r'[A-Za-z]+\([^)]*\)', '', response)
+        response = response.strip()
 
-            # Try to extract only actual message content
-            emoji_start = re.search(r'(📊|📈|📉|💰|⚠️|🔍)', cleaned_response)
-            message_end = re.search(r'본 정보는 투자 참고용이며, 투자 결정과 책임은 투자자에게 있습니다\.', cleaned_response)
+        # If response contains preamble text before the actual message,
+        # try to extract from the first emoji onwards
+        emoji_match = re.search(r'[📊📈📉💰⚠️🔍🔥💹🏢📋🧭💡🚀⚡🎯]', response)
+        if emoji_match and emoji_match.start() > 0:
+            # There's text before the first emoji - likely preamble, strip it
+            extracted = response[emoji_match.start():]
+            logger.info(f"Stripped {emoji_match.start()} chars of preamble from response")
+            return extracted
 
-            if emoji_start and message_end:
-                return cleaned_response[emoji_start.start():message_end.end()]
-
-        # If API response object (has content attribute)
-        if hasattr(response, 'content') and response.content is not None:
-            logger.info("Response has content attribute.")
-            return response.content
-
-        # ChatCompletionMessage case - has tool_calls
-        if hasattr(response, 'tool_calls') and response.tool_calls:
-            logger.info("Response has tool_calls.")
-
-            # Ignore tool_calls info, return function_call result if exists
-            if hasattr(response, 'function_call') and response.function_call:
-                logger.info("Response has function_call result.")
-                return f"Function call result: {response.function_call}"
-
-            # Only generate text format response for subsequent processing
-            # Actual tool_calls processing needs separate logic
-            return "Cannot extract text from tool call result. Contact administrator."
-
-        # Last attempt: convert to string and extract message format with regex
-        response_str = str(response)
-        logger.debug(f"Response string before regex: {response_str[:100]}...")
-
-        # Try to extract Telegram message format with regex
-        content_match = re.search(r'(📊|📈|📉|💰|⚠️|🔍).*?본 정보는 투자 참고용이며, 투자 결정과 책임은 투자자에게 있습니다\.', response_str, re.DOTALL)
-
-        if content_match:
-            logger.info("Extracted message content with regex.")
-            return content_match.group(0)
-
-        # If regex also fails, return default message
-        logger.warning("Cannot extract valid Telegram message from response.")
-        logger.warning(f"Original message not extracted by regex: {response_str[:100]}...")
-
-        # Generate default message
-        default_message = f"""📊 {metadata['stock_name']}({metadata['stock_code']}) - 분석 요약
-
-    1. 현재가: (정보 없음)
-    2. 최근 추세: (정보 없음)
-    3. 주요 체크포인트: 상세 분석 보고서 참조.
-
-    ⚠️ 자동 생성 오류로 상세 정보를 표시할 수 없습니다. 전체 보고서를 확인하세요.
-    본 정보는 투자 참고용이며, 투자 결정과 책임은 투자자에게 있습니다."""
-
-        return default_message
+        return response
 
     def save_telegram_message(self, message, output_path):
         """
