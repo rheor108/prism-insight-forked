@@ -197,7 +197,7 @@ class TelegramSummaryGenerator:
         optimizer = self.create_optimizer_agent(metadata, current_date, from_lang, to_lang)
 
         # Use ClaudeCodeLLM (Claude Opus is capable enough without evaluator-optimizer loop)
-        llm = ClaudeCodeLLM(instruction=optimizer.instruction)
+        llm = ClaudeCodeLLM(instruction=optimizer.instruction, max_turns=1)
 
         # Construct message prompt
         prompt_message = f"""다음은 {metadata['stock_name']}({metadata['stock_code']}) 종목에 대한 상세 분석 보고서입니다.

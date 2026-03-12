@@ -121,7 +121,7 @@ class CompressionManager:
 
             compressor_agent = create_memory_compressor_agent(self.language)
 
-            llm = ClaudeCodeLLM(instruction=compressor_agent.instruction)
+            llm = ClaudeCodeLLM(instruction=compressor_agent.instruction, max_turns=1)
 
             # Fetch current prices for hindsight context
             hindsight_prices = self._fetch_hindsight_prices(entries)
@@ -177,7 +177,7 @@ class CompressionManager:
 
             compressor_agent = create_memory_compressor_agent(self.language)
 
-            llm = ClaudeCodeLLM(instruction=compressor_agent.instruction)
+            llm = ClaudeCodeLLM(instruction=compressor_agent.instruction, max_turns=1)
 
             entries_text = self._format_entries_for_intuition(entries)
             prompt = self._build_layer3_prompt(entries_text, len(entries))
