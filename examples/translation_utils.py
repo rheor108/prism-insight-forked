@@ -56,7 +56,7 @@ Guidelines:
 Return ONLY the translated text without explanations or comments.
 """,
             default_model="haiku",
-            max_turns=1,
+            max_turns=2,
         )
     
     async def translate_text(self, text: str, from_lang: str = "ko", to_lang: str = "en") -> str:

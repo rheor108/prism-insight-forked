@@ -828,7 +828,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             logger.info(f"  - Investment periods: {json.dumps(investment_periods, ensure_ascii=False)}")
 
             # LLM call to generate sell decision
-            llm = ClaudeCodeLLM(instruction=self.sell_decision_agent.instruction, server_names=getattr(self.sell_decision_agent, 'server_names', []))
+            llm = ClaudeCodeLLM(instruction=self.sell_decision_agent.instruction, server_names=getattr(self.sell_decision_agent, 'server_names', []), max_turns=15)
 
             # Prepare prompt based on language (Korean text preserved for language == "ko" blocks)
             if self.language == "ko":

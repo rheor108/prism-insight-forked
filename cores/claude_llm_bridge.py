@@ -103,6 +103,14 @@ async def claude_generate(
                 f"claude -p exited with code {process.returncode}: {error_msg[:200]}"
             )
 
+        # Detect "Reached max turns" error returned as text output
+        if result.startswith("Error: Reached max turns"):
+            logger.error(f"claude -p hit max_turns limit: {result} (max_turns={max_turns})")
+            raise RuntimeError(
+                f"claude -p reached max turns ({max_turns}). "
+                f"Increase max_turns for this agent."
+            )
+
         logger.info(f"claude -p response: {len(result)} chars")
         return result
 

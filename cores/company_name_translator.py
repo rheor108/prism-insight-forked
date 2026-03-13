@@ -101,7 +101,7 @@ Return ONLY the English company name, nothing else. No quotes, no explanation.
 """
 
         # Use haiku for cost-efficient company name translation
-        llm = ClaudeCodeLLM(instruction=instruction, default_model="haiku", max_turns=1)
+        llm = ClaudeCodeLLM(instruction=instruction, default_model="haiku", max_turns=2)
 
         # Generate translation
         english_name = await llm.generate_str(

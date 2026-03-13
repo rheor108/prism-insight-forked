@@ -120,7 +120,7 @@ class USJournalManager:
             # Create journal agent (uses yahoo_finance instead of kospi_kosdaq)
             journal_agent = create_trading_journal_agent(self.language, market="US")
 
-            llm = ClaudeCodeLLM(instruction=journal_agent.instruction, server_names=getattr(journal_agent, 'server_names', []))
+            llm = ClaudeCodeLLM(instruction=journal_agent.instruction, server_names=getattr(journal_agent, 'server_names', []), max_turns=15)
 
             prompt = self._build_analysis_prompt(
                 company_name, ticker, buy_price, buy_date,

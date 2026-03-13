@@ -117,7 +117,7 @@ async def translate_telegram_message(
         translator = create_telegram_translator_agent(from_lang=from_lang, to_lang=to_lang)
 
         # Use haiku for cost-efficient translation
-        llm = ClaudeCodeLLM(instruction=translator.instruction, default_model="haiku", max_turns=1)
+        llm = ClaudeCodeLLM(instruction=translator.instruction, default_model="haiku", max_turns=2)
 
         # Generate translation
         translated = await llm.generate_str(message=message)

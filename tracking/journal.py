@@ -81,7 +81,7 @@ class JournalManager:
             # Create journal agent
             journal_agent = create_trading_journal_agent(self.language)
 
-            llm = ClaudeCodeLLM(instruction=journal_agent.instruction, server_names=getattr(journal_agent, 'server_names', []))
+            llm = ClaudeCodeLLM(instruction=journal_agent.instruction, server_names=getattr(journal_agent, 'server_names', []), max_turns=15)
 
             prompt = self._build_analysis_prompt(
                 company_name, ticker, buy_price, buy_date,

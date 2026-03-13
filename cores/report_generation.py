@@ -288,7 +288,7 @@ Comprehensive Analysis Report:
 {all_reports}
 """
 
-        llm = ClaudeCodeLLM(instruction=instruction, max_turns=1)
+        llm = ClaudeCodeLLM(instruction=instruction, max_turns=2)
         executive_summary = await llm.generate_str(message=message)
         return executive_summary
     except Exception as e:
@@ -506,7 +506,7 @@ Please present a consistent and executable investment strategy that investors ca
 ## ⚠️ CHARACTER LIMIT: Keep the report under 3000 characters. Be concise and focus on key insights!
 """
 
-        llm = ClaudeCodeLLM(instruction=instruction, max_turns=1)
+        llm = ClaudeCodeLLM(instruction=instruction, max_turns=2)
         investment_strategy = await llm.generate_str(message=message)
         logger.info(f"Completed investment_strategy - {len(investment_strategy)} characters")
         return investment_strategy

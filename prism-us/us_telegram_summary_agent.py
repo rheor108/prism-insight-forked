@@ -440,7 +440,7 @@ Provide specific feedback for improvement if rating is below EXCELLENT."""
         optimizer = self.create_optimizer_agent(metadata, current_date, language)
 
         # Use ClaudeCodeLLM (Claude Opus is capable enough without evaluator-optimizer loop)
-        llm = ClaudeCodeLLM(instruction=optimizer.instruction, max_turns=1)
+        llm = ClaudeCodeLLM(instruction=optimizer.instruction, max_turns=2)
 
         # Get display name for trigger type
         trigger_display = self._get_trigger_display_name(trigger_type)

@@ -284,14 +284,14 @@ class StockTrackingAgent:
 
             # LLM call to generate trading scenario
             # Use a focused instruction for JSON extraction only (no MCP tools needed).
-            # The report_content already contains all analysis data, so max_turns=1 suffices.
+            # The report_content already contains all analysis data, so max_turns=2 suffices.
             scenario_instruction = (
                 self.trading_agent.instruction
                 + "\n\nIMPORTANT: All data you need is provided in the report below. "
                 "Do NOT use any external tools or MCP servers. "
                 "Respond ONLY with a single JSON object. No explanation, no markdown fences."
             )
-            llm = ClaudeCodeLLM(instruction=scenario_instruction, server_names=[], max_turns=1)
+            llm = ClaudeCodeLLM(instruction=scenario_instruction, server_names=[], max_turns=2)
 
             # Build trigger info section if available
             trigger_info_section = ""
