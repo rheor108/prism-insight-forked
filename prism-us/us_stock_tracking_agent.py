@@ -307,8 +307,10 @@ def check_sector_diversity(cursor, sector: str, max_same_sector: int, concentrat
 
         same_sector_count = sum(1 for s in sectors if s and s.lower() == sector.lower())
 
+        MIN_HOLDINGS_FOR_CONCENTRATION_CHECK = 3
         if same_sector_count >= max_same_sector or \
-           (sectors and same_sector_count / len(sectors) >= concentration_ratio):
+           (len(sectors) >= MIN_HOLDINGS_FOR_CONCENTRATION_CHECK and
+            same_sector_count / len(sectors) >= concentration_ratio):
             logger.warning(
                 f"Sector '{sector}' over-concentration risk: "
                 f"Currently holding {same_sector_count} stocks "
