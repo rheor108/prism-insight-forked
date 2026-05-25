@@ -33,8 +33,27 @@ if not _CLAUDE_BIN:
     else:
         _CLAUDE_BIN = shutil.which("claude") or "claude"
 
-# Ensure HOME points to seungbum's home for .claude.json auth config
-_CLAUDE_HOME = os.environ.get("CLAUDE_HOME", "/home/seungbum")
+# Ensure HOME points to a directory that actually has claude auth state.
+# Host cron runs as `seungbum` (~/.claude lives in /home/seungbum/.claude);
+# Docker cron runs as root with the host's .claude bind-mounted to
+# /root/.claude. Hard-coding /home/seungbum (the previous default) caused
+# `claude -p` to exit=1 with empty stderr inside Docker because the auth
+# file was simply not where HOME pointed. Explicit CLAUDE_HOME still wins.
+def _resolve_claude_home() -> str:
+    explicit = os.environ.get("CLAUDE_HOME")
+    if explicit:
+        return explicit
+    candidates = [
+        os.environ.get("HOME"),  # whatever the runtime user already has
+        "/home/seungbum",        # host install
+        "/root",                 # Docker container (HOME=/root by default)
+    ]
+    for candidate in candidates:
+        if candidate and (Path(candidate) / ".claude").is_dir():
+            return candidate
+    return os.environ.get("HOME") or "/root"
+
+_CLAUDE_HOME = _resolve_claude_home()
 
 
 async def claude_generate(
@@ -68,6 +87,15 @@ async def claude_generate(
         "--max-turns", str(max_turns),
     ]
 
+    # The user's host settings.json sets `permissions.defaultMode = bypassPermissions`,
+    # which translates to `--dangerously-skip-permissions` internally. Claude refuses
+    # that combination under root (security). Inside the Docker container we run as
+    # root and inherit the same .claude/ via bind mount, so every call exited=1 with
+    # 100% failure rate. Override the mode when running as root; on the host (non-root)
+    # we honor the user's settings exactly as before.
+    if os.geteuid() == 0:
+        cmd.extend(["--permission-mode", "acceptEdits"])
+
     if system_prompt:
         cmd.extend(["--system-prompt", system_prompt])
 
@@ -98,9 +126,23 @@ async def claude_generate(
 
         if process.returncode != 0:
             error_msg = stderr.decode("utf-8").strip()
-            logger.error(f"claude -p failed (exit={process.returncode}): {error_msg[:500]}")
+            stdout_msg = result  # Some CLIs emit error text on stdout, not stderr.
+            logger.error(
+                "claude -p failed (exit=%s) | stderr=%r | stdout=%r | "
+                "cmd=%s | HOME=%s | model=%s | max_turns=%s | prompt_len=%d",
+                process.returncode,
+                error_msg[:500],
+                stdout_msg[:500],
+                cmd,
+                _CLAUDE_HOME,
+                model,
+                max_turns,
+                len(user_message),
+            )
+            # Surface whichever stream carried the diagnostic so callers see it.
+            detail = error_msg or stdout_msg or "(no output)"
             raise RuntimeError(
-                f"claude -p exited with code {process.returncode}: {error_msg[:200]}"
+                f"claude -p exited with code {process.returncode}: {detail[:200]}"
             )
 
         # Detect "Reached max turns" error returned as text output

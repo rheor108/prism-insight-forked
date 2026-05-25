@@ -356,8 +356,14 @@ def parse_price_value(value: Any) -> float:
 
 
 def default_scenario() -> Dict[str, Any]:
-    """Return default trading scenario for US stocks."""
+    """Return default trading scenario for US stocks.
+
+    The `_analysis_failed` sentinel lets callers reliably distinguish a
+    real LLM "no_entry" verdict from this fallback shape (which historically
+    leaked into the score-decision override and caused phantom entries).
+    """
     return {
+        "_analysis_failed": True,
         "portfolio_analysis": "Analysis failed",
         "buy_score": 0,
         "decision": "no_entry",
@@ -783,6 +789,24 @@ class USStockTrackingAgent:
                 trigger_type=trigger_type,
                 trigger_mode=trigger_mode
             )
+
+            # When _extract_trading_scenario falls back to default_scenario()
+            # (e.g. `claude -p` exited non-zero, JSON parse exhausted), the
+            # buy_score / min_score / decision fields all collapse to defaults
+            # that historically tricked the score-decision override into a
+            # phantom entry. Surface the failure to the caller instead so the
+            # stock is skipped cleanly.
+            if scenario.get("_analysis_failed"):
+                logger.error(
+                    f"{ticker} ({company_name}): trading scenario extraction "
+                    f"failed; skipping rather than falling back to defaults."
+                )
+                return {
+                    "success": False,
+                    "ticker": ticker,
+                    "company_name": company_name,
+                    "error": "scenario extraction failed"
+                }
 
             # Override scenario sector with yfinance data if LLM returned Unknown
             scenario_sector = scenario.get("sector", "Unknown")
