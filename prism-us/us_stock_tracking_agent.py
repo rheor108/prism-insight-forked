@@ -1151,11 +1151,11 @@ class USStockTrackingAgent:
         try:
             ticker = stock_data.get('ticker', '')
             company_name = stock_data.get('company_name', '')
-            buy_price = stock_data.get('buy_price', 0)
+            buy_price = stock_data.get('buy_price') or 0
             buy_date = stock_data.get('buy_date', '')
-            current_price = stock_data.get('current_price', 0)
-            target_price = stock_data.get('target_price', 0)
-            stop_loss = stock_data.get('stop_loss', 0)
+            current_price = stock_data.get('current_price') or 0
+            target_price = stock_data.get('target_price') or 0
+            stop_loss = stock_data.get('stop_loss') or 0
 
             # Calculate profit rate
             profit_rate = ((current_price - buy_price) / buy_price) * 100 if buy_price > 0 else 0
@@ -1383,11 +1383,11 @@ class USStockTrackingAgent:
         """Rule-based sell decision (fallback when AI analysis fails)."""
         try:
             ticker = stock_data.get('ticker', '')
-            buy_price = stock_data.get('buy_price', 0)
+            buy_price = stock_data.get('buy_price') or 0
             buy_date = stock_data.get('buy_date', '')
-            current_price = stock_data.get('current_price', 0)
-            target_price = stock_data.get('target_price', 0)
-            stop_loss = stock_data.get('stop_loss', 0)
+            current_price = stock_data.get('current_price') or 0
+            target_price = stock_data.get('target_price') or 0
+            stop_loss = stock_data.get('stop_loss') or 0
 
             profit_rate = ((current_price - buy_price) / buy_price) * 100 if buy_price > 0 else 0
             buy_datetime = datetime.strptime(buy_date, "%Y-%m-%d %H:%M:%S")
@@ -1544,9 +1544,9 @@ class USStockTrackingAgent:
         try:
             ticker = stock_data.get('ticker', '')
             company_name = stock_data.get('company_name', '')
-            buy_price = stock_data.get('buy_price', 0)
+            buy_price = stock_data.get('buy_price') or 0
             buy_date = stock_data.get('buy_date', '')
-            current_price = stock_data.get('current_price', 0)
+            current_price = stock_data.get('current_price') or 0
             scenario_json = stock_data.get('scenario', '{}')
             trigger_type = stock_data.get('trigger_type', 'AI_Analysis')
             trigger_mode = stock_data.get('trigger_mode', 'unknown')
@@ -1654,12 +1654,49 @@ class USStockTrackingAgent:
                 current_price = await self._get_current_stock_price(ticker)
 
                 if current_price <= 0:
-                    old_price = stock.get('current_price', 0)
+                    old_price = stock.get('current_price') or 0
                     logger.warning(f"{ticker} current price query failed, using last: ${old_price:.2f}")
                     current_price = old_price
 
                 stock['current_price'] = current_price
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # Backfill target/stop from scenario JSON when DB columns are
+                # missing or zero. Buy path may persist NULL/0 when the LLM
+                # scenario carries valid risk levels; without this the sell
+                # decision's `> 0` checks (see _fallback_sell_decision) silently
+                # skip stop-loss/target triggers.
+                scenario_str = stock.get('scenario') or '{}'
+                try:
+                    if isinstance(scenario_str, str):
+                        scenario_json = json.loads(scenario_str)
+                        sc_target = scenario_json.get('target_price')
+                        sc_stop = scenario_json.get('stop_loss')
+                        col_target = stock.get('target_price') or 0
+                        col_stop = stock.get('stop_loss') or 0
+                        updates = []
+                        params = []
+                        if sc_target and col_target == 0:
+                            stock['target_price'] = sc_target
+                            updates.append("target_price = ?")
+                            params.append(sc_target)
+                        if sc_stop and col_stop == 0:
+                            stock['stop_loss'] = sc_stop
+                            updates.append("stop_loss = ?")
+                            params.append(sc_stop)
+                        if updates:
+                            params.append(ticker)
+                            self.cursor.execute(
+                                f"UPDATE us_stock_holdings SET {', '.join(updates)} WHERE ticker = ?",
+                                params,
+                            )
+                            self.conn.commit()
+                            logger.info(
+                                f"{ticker} backfilled risk params from scenario: "
+                                f"target={stock.get('target_price')}, stop={stock.get('stop_loss')}"
+                            )
+                except Exception as backfill_err:
+                    logger.warning(f"{ticker} scenario backfill failed: {backfill_err}")
 
                 # Analyze sell decision
                 should_sell, sell_reason = await self._analyze_sell_decision(stock)
@@ -1796,8 +1833,8 @@ class USStockTrackingAgent:
             if holdings and len(holdings) > 0:
                 profit_rates = []
                 for h in holdings:
-                    buy_price = h.get('buy_price', 0)
-                    current_price = h.get('current_price', 0)
+                    buy_price = h.get('buy_price') or 0
+                    current_price = h.get('current_price') or 0
                     if buy_price > 0:
                         profit_rate = ((current_price - buy_price) / buy_price) * 100
                         profit_rates.append((h.get('ticker'), h.get('company_name'), profit_rate))
@@ -1819,11 +1856,14 @@ class USStockTrackingAgent:
                 for stock in holdings:
                     ticker = stock.get('ticker', '')
                     company_name = stock.get('company_name', '')
-                    buy_price = stock.get('buy_price', 0)
-                    current_price = stock.get('current_price', 0)
+                    # Coerce None (NULL in DB) to 0 — dict.get(key, default) only
+                    # falls back to default when the key is missing, not when the
+                    # value is None, so `or 0` is required for nullable columns.
+                    buy_price = stock.get('buy_price') or 0
+                    current_price = stock.get('current_price') or 0
                     buy_date = stock.get('buy_date', '')
-                    target_price = stock.get('target_price', 0)
-                    stop_loss = stock.get('stop_loss', 0)
+                    target_price = stock.get('target_price') or 0
+                    stop_loss = stock.get('stop_loss') or 0
                     scenario_str = stock.get('scenario', '{}')
 
                     # Extract sector information from scenario
@@ -1970,6 +2010,21 @@ class USStockTrackingAgent:
                     normalized_decision = "entry"
 
                 if normalized_decision == "entry":
+                    # LLM may legitimately return null target/stop when no safe
+                    # stop level exists within allowed risk; entering without
+                    # them strips risk management even if score forced override.
+                    tp_val = scenario.get("target_price")
+                    sl_val = scenario.get("stop_loss")
+                    if (tp_val is None or sl_val is None
+                            or (isinstance(tp_val, (int, float)) and tp_val <= 0)
+                            or (isinstance(sl_val, (int, float)) and sl_val <= 0)):
+                        logger.warning(
+                            f"Skipping {company_name}({ticker}): missing risk params "
+                            f"(target_price={tp_val}, stop_loss={sl_val}). "
+                            f"Cannot enter without valid stop-loss."
+                        )
+                        continue
+
                     buy_success = await self.buy_stock(ticker, company_name, current_price, scenario, rank_change_msg)
 
                     if buy_success:

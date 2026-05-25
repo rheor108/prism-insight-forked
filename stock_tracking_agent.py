@@ -764,11 +764,11 @@ class StockTrackingAgent:
         """
         try:
             ticker = stock_data.get('ticker', '')
-            buy_price = stock_data.get('buy_price', 0)
+            buy_price = stock_data.get('buy_price') or 0
             buy_date = stock_data.get('buy_date', '')
-            current_price = stock_data.get('current_price', 0)
-            target_price = stock_data.get('target_price', 0)
-            stop_loss = stock_data.get('stop_loss', 0)
+            current_price = stock_data.get('current_price') or 0
+            target_price = stock_data.get('target_price') or 0
+            stop_loss = stock_data.get('stop_loss') or 0
 
             # Calculate profit rate
             profit_rate = ((current_price - buy_price) / buy_price) * 100
@@ -848,9 +848,9 @@ class StockTrackingAgent:
         try:
             ticker = stock_data.get('ticker', '')
             company_name = stock_data.get('company_name', '')
-            buy_price = stock_data.get('buy_price', 0)
+            buy_price = stock_data.get('buy_price') or 0
             buy_date = stock_data.get('buy_date', '')
-            current_price = stock_data.get('current_price', 0)
+            current_price = stock_data.get('current_price') or 0
             scenario_json = stock_data.get('scenario', '{}')
             trigger_type = stock_data.get('trigger_type', 'AI Analysis')
             trigger_mode = stock_data.get('trigger_mode', 'unknown')
@@ -1064,24 +1064,25 @@ class StockTrackingAgent:
                 current_price = await self._get_current_stock_price(ticker)
 
                 if current_price <= 0:
-                    old_price = stock.get('current_price', 0)
+                    old_price = stock.get('current_price') or 0
                     logger.warning(f"{ticker} Current price query failed, keeping previous price: {old_price}")
                     current_price = old_price
 
                 # Update stock price information
                 stock['current_price'] = current_price
 
-                # Check scenario JSON string
-                scenario_str = stock.get('scenario', '{}')
+                # Check scenario JSON string. Note: `stock.get(col, 0) == 0`
+                # silently fails when col is None (dict.get keeps None), so
+                # use `(... or 0) == 0` to also catch NULL DB columns.
+                scenario_str = stock.get('scenario') or '{}'
                 try:
                     if isinstance(scenario_str, str):
                         scenario_json = json.loads(scenario_str)
 
-                        # Check and update target price/stop-loss
-                        if 'target_price' in scenario_json and stock.get('target_price', 0) == 0:
+                        if 'target_price' in scenario_json and (stock.get('target_price') or 0) == 0:
                             stock['target_price'] = scenario_json['target_price']
 
-                        if 'stop_loss' in scenario_json and stock.get('stop_loss', 0) == 0:
+                        if 'stop_loss' in scenario_json and (stock.get('stop_loss') or 0) == 0:
                             stock['stop_loss'] = scenario_json['stop_loss']
                 except:
                     logger.warning(f"{ticker} Scenario JSON parse failed")
@@ -1203,8 +1204,8 @@ class StockTrackingAgent:
             if holdings and len(holdings) > 0:
                 profit_rates = []
                 for h in holdings:
-                    buy_price = h.get('buy_price', 0)
-                    current_price = h.get('current_price', 0)
+                    buy_price = h.get('buy_price') or 0
+                    current_price = h.get('current_price') or 0
                     if buy_price > 0:
                         profit_rate = ((current_price - buy_price) / buy_price) * 100
                         profit_rates.append((h.get('ticker'), h.get('company_name'), profit_rate))
@@ -1226,12 +1227,15 @@ class StockTrackingAgent:
                 for stock in holdings:
                     ticker = stock.get('ticker', '')
                     company_name = stock.get('company_name', '')
-                    buy_price = stock.get('buy_price', 0)
-                    current_price = stock.get('current_price', 0)
+                    # Coerce None (NULL in DB) to 0 — dict.get(key, default)
+                    # only falls back when the key is missing, not when its
+                    # value is None, so `or 0` is required here.
+                    buy_price = stock.get('buy_price') or 0
+                    current_price = stock.get('current_price') or 0
                     buy_date = stock.get('buy_date', '')
                     scenario_str = stock.get('scenario', '{}')
-                    target_price = stock.get('target_price', 0)
-                    stop_loss = stock.get('stop_loss', 0)
+                    target_price = stock.get('target_price') or 0
+                    stop_loss = stock.get('stop_loss') or 0
 
                     # Extract sector information from scenario
                     sector = "알 수 없음"
