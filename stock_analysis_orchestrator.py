@@ -1275,6 +1275,22 @@ if __name__ == "__main__":
         logger.info(f"Today ({current_date}) is a stock market holiday. Not executing batch job.")
         sys.exit(0)
 
+    # Self-instance lock: refuse to start if another orchestrator is already
+    # running on this host. Defends against accidental double-fires (host vs
+    # Docker cron racing, manual run while cron also fires, etc.) which used
+    # to corrupt the shared KRX session and cascade into all-retries-fail.
+    import fcntl
+    _lock_path = Path(__file__).resolve().parent / ".kr_orchestrator.lock"
+    _lock_fp = open(_lock_path, "w")
+    try:
+        fcntl.flock(_lock_fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        logger.error(
+            f"Another KR orchestrator is already running (lock at {_lock_path}). "
+            "Exiting to avoid KRX session contention."
+        )
+        sys.exit(0)
+
     # Start timer thread and execute main function only on business days
     import threading
 
