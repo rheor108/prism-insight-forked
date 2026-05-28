@@ -1291,6 +1291,32 @@ if __name__ == "__main__":
         )
         sys.exit(0)
 
+    # Release the KRX server-side session on exit. The kospi-kosdaq library's
+    # built-in "logout first" navigation runs against a cookieless Playwright
+    # context, so it never actually destroys the previous session — KRX returns
+    # CD011 (중복 로그인) on the next login. Logging out here with the live
+    # requests.Session cookies properly closes the server-side session so the
+    # next cron run can log back in without waiting for KRX's idle timeout.
+    import atexit
+    def _release_krx_session():
+        try:
+            import krx_data_client
+            client = getattr(krx_data_client, "_default_client", None)
+            if client is None:
+                return
+            auth = getattr(client, "_auth_manager", None)
+            session = getattr(auth, "_session", None) if auth else None
+            if session is None:
+                return
+            logout_url = (
+                "https://data.krx.co.kr/contents/MDC/COMS/client/MDCCOMS001D2.cmd"
+            )
+            session.get(logout_url, timeout=10)
+            logger.info("KRX server-side session released via logout URL")
+        except Exception as e:
+            logger.warning(f"KRX logout-on-exit failed (non-fatal): {e}")
+    atexit.register(_release_krx_session)
+
     # Start timer thread and execute main function only on business days
     import threading
 
