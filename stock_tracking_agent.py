@@ -184,9 +184,9 @@ class StockTrackingAgent:
         """Check if stock is already in holdings (delegates to tracking.helpers)"""
         return is_ticker_in_holdings(self.cursor, ticker)
 
-    async def _get_current_slots_count(self) -> int:
+    async def _get_current_slots_count(self, account_mode: str = None) -> int:
         """Get current number of holdings (delegates to tracking.helpers)"""
-        return get_current_slots_count(self.cursor)
+        return get_current_slots_count(self.cursor, account_mode)
 
     async def _check_sector_diversity(self, sector: str) -> bool:
         """Check for over-concentration in same sector (delegates to tracking.helpers)"""
@@ -575,7 +575,7 @@ class StockTrackingAgent:
         except Exception:
             return ""
 
-    async def buy_stock(self, ticker: str, company_name: str, current_price: float, scenario: Dict[str, Any], rank_change_msg: str = "") -> bool:
+    async def buy_stock(self, ticker: str, company_name: str, current_price: float, scenario: Dict[str, Any], rank_change_msg: str = "", account_mode: str = "demo") -> bool:
         """
         Process stock purchase
 
@@ -625,8 +625,8 @@ class StockTrackingAgent:
             self.cursor.execute(
                 """
                 INSERT INTO stock_holdings
-                (ticker, company_name, buy_price, buy_date, current_price, last_updated, scenario, target_price, stop_loss, trigger_type, trigger_mode)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (ticker, company_name, buy_price, buy_date, current_price, last_updated, scenario, target_price, stop_loss, trigger_type, trigger_mode, account_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ticker,
@@ -639,7 +639,8 @@ class StockTrackingAgent:
                     scenario.get('target_price', 0),
                     scenario.get('stop_loss', 0),
                     trigger_type,
-                    trigger_mode
+                    trigger_mode,
+                    account_mode,
                 )
             )
             self.conn.commit()
@@ -1359,15 +1360,41 @@ class StockTrackingAgent:
                 min_score = scenario.get("min_score", 0)
                 logger.info(f"Buy score check: {company_name}({ticker}) - Score: {buy_score}")
                 if analysis_result.get("decision") == "Enter":
-                    # Process buy
-                    buy_success = await self.buy_stock(ticker, company_name, current_price, scenario, rank_change_msg)
+                    from trading.trading_mode import (
+                        resolve_trading_mode, get_buy_sizing_mode, get_max_daily_buys,
+                    )
+                    from tracking.helpers import count_today_buys
+                    trading_mode = resolve_trading_mode()
+
+                    # Daily buy cap
+                    if count_today_buys(self.cursor, trading_mode) >= get_max_daily_buys():
+                        logger.warning(
+                            f"Daily buy cap ({get_max_daily_buys()}) reached for "
+                            f"{trading_mode}; skipping {company_name}({ticker})"
+                        )
+                        continue
+
+                    # Process buy (record account_mode)
+                    buy_success = await self.buy_stock(
+                        ticker, company_name, current_price, scenario,
+                        rank_change_msg, account_mode=trading_mode,
+                    )
 
                     if buy_success:
-                        # Call actual account trading function (async)
                         from trading.domestic_stock_trading import AsyncTradingContext
-                        async with AsyncTradingContext() as trading:
-                            # Execute async buy with limit price for reserved orders
-                            trade_result = await trading.async_buy_stock(stock_code=ticker, limit_price=current_price)
+                        async with AsyncTradingContext(mode=trading_mode) as trading:
+                            # Slot-even sizing (fall back to fixed when configured)
+                            buy_amount = None
+                            if get_buy_sizing_mode() == "slot_even":
+                                occupied = await self._get_current_slots_count(trading_mode)
+                                remaining = self.max_slots - occupied
+                                buy_amount = await asyncio.to_thread(
+                                    trading.calculate_slot_even_amount, remaining
+                                )
+                            trade_result = await trading.async_buy_stock(
+                                stock_code=ticker, buy_amount=buy_amount,
+                                limit_price=current_price,
+                            )
 
                         if trade_result['success']:
                             logger.info(f"Actual purchase successful: {trade_result['message']}")
@@ -1705,6 +1732,17 @@ class StockTrackingAgent:
 
             # Initialize with language parameter
             await self.initialize(language)
+
+            from trading.trading_mode import resolve_trading_mode
+            if resolve_trading_mode() == "real":
+                warn = "⚠️ 실전 매매 모드가 활성화되었습니다 (KR). 실제 주문이 체결됩니다."
+                logger.warning(warn)
+                # best-effort telegram notice (non-blocking, ignore failures)
+                if self.telegram_bot and chat_id:
+                    try:
+                        await self.telegram_bot.send_message(chat_id=chat_id, text=warn)
+                    except Exception as e:
+                        logger.warning(f"Live-mode telegram notice failed: {e}")
 
             try:
                 # Process reports
