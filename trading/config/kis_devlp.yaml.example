@@ -11,6 +11,11 @@ auto_trading: true
 # 기본 매매 환경 (demo : 모의투자, real : 실제 투자)
 default_mode: demo
 
+# 매수 금액 산정 방식 (slot_even: 가용현금/잔여슬롯 균등 배분, fixed: 위 고정금액)
+buy_sizing_mode: fixed
+# 시장당 하루 최대 신규매수 종목 수 (폭주 방지)
+max_daily_buys: 3
+
 #홈페이지에서 API서비스 신청시 받은 Appkey, Appsecret 값 설정
 #실전투자 (https://openapi.koreainvestment.com에서 발급)
 my_app: "실전투자용_앱키를_여기에_입력하세요"
