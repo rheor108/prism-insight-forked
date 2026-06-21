@@ -35,3 +35,22 @@ def test_method_falls_back_when_summary_empty():
     trader.buy_amount = 1000
     result = USStockTrading.calculate_slot_even_amount(trader, remaining_slots=5)
     assert result == 1000
+
+
+def test_method_uses_safe_float_for_numeric_string():
+    # Proves the method delegates to slot_even_amount and _safe_float parses
+    # KIS numeric strings; result (2000) differs from the fallback (1000).
+    trader = MagicMock(spec=USStockTrading)
+    trader.get_account_summary.return_value = {"available_amount": "10000.00"}
+    trader.buy_amount = 1000
+    result = USStockTrading.calculate_slot_even_amount(trader, remaining_slots=5)
+    assert result == 2000
+
+
+def test_method_falls_back_when_available_amount_is_empty_string():
+    # KIS occasionally returns '' for balances; _safe_float('') -> 0.0 -> fallback.
+    trader = MagicMock(spec=USStockTrading)
+    trader.get_account_summary.return_value = {"available_amount": ""}
+    trader.buy_amount = 1000
+    result = USStockTrading.calculate_slot_even_amount(trader, remaining_slots=5)
+    assert result == 1000
