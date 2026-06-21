@@ -39,6 +39,19 @@ with open(CONFIG_FILE, encoding="UTF-8") as f:
     _cfg = yaml.load(f, Loader=yaml.FullLoader)
 
 
+def slot_even_amount(available_amount, remaining_slots: int, default_amount: int) -> int:
+    """Evenly split available cash across remaining portfolio slots.
+
+    Pure helper (no I/O) so it is trivially unit-testable. Returns
+    default_amount when there is no free slot or no usable cash.
+    """
+    if remaining_slots <= 0:
+        return default_amount
+    if not available_amount or available_amount <= 0:
+        return default_amount
+    return math.floor(available_amount / remaining_slots)
+
+
 class DomesticStockTrading:
     """Domestic stock trading class"""
 
@@ -222,6 +235,21 @@ class DomesticStockTrading:
             logger.info(f"[{stock_code}] Can buy: {current_quantity} shares x {current_price:,} KRW = {total_amount:,} KRW")
 
         return current_quantity
+
+    def calculate_slot_even_amount(self, remaining_slots: int) -> int:
+        """Per-stock KRW amount = available cash / remaining slots.
+
+        Falls back to the configured fixed buy amount if the balance
+        inquiry fails.
+        """
+        summary = self.get_account_summary()
+        available = float(summary.get("available_amount", 0)) if summary else 0
+        amount = slot_even_amount(available, remaining_slots, self.buy_amount)
+        logger.info(
+            f"[Slot-even] available {available:,.0f} KRW / {remaining_slots} slots "
+            f"-> {amount:,} KRW per stock"
+        )
+        return amount
 
     def buy_market_price(self, stock_code: str, buy_amount: int = None) -> Dict[str, Any]:
         """
