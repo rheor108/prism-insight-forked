@@ -496,8 +496,9 @@ async def async_initialize_us_database(db_path: Optional[str] = None):
             await conn.execute(
                 f"ALTER TABLE {table} ADD COLUMN account_mode TEXT DEFAULT 'demo'"
             )
-        except Exception:
-            pass
+        except Exception as e:
+            if "duplicate column name" not in str(e).lower():
+                logger.warning(f"Async migration warning for {table}: {e}")
 
     await conn.commit()
     logger.info(f"US database initialized (async): {db_path}")
