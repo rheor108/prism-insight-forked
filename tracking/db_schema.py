@@ -294,3 +294,26 @@ def add_sector_column_if_missing(cursor, conn):
             logger.info(f"Added sector column to {table} table")
         except Exception:
             pass  # Column already exists
+
+
+def add_account_mode_column_if_missing(cursor, conn):
+    """
+    Add account_mode column to trading tables (demo/real split migration).
+
+    Existing rows default to 'demo' so prior simulated trades stay labeled
+    correctly. Idempotent: re-running is a no-op once the column exists.
+
+    Args:
+        cursor: SQLite cursor
+        conn: SQLite connection
+    """
+    tables = ["stock_holdings", "trading_history", "trading_journal"]
+    for table in tables:
+        try:
+            cursor.execute(
+                f"ALTER TABLE {table} ADD COLUMN account_mode TEXT DEFAULT 'demo'"
+            )
+            conn.commit()
+            logger.info(f"Added account_mode column to {table} table")
+        except Exception:
+            pass  # Column already exists

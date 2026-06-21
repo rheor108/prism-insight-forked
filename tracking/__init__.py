@@ -11,6 +11,7 @@ from tracking.db_schema import (
     add_scope_column_if_missing,
     add_trigger_columns_if_missing,
     add_sector_column_if_missing,
+    add_account_mode_column_if_missing,
 )
 from tracking.helpers import (
     extract_ticker_info,
@@ -40,6 +41,7 @@ __all__ = [
     "add_scope_column_if_missing",
     "add_trigger_columns_if_missing",
     "add_sector_column_if_missing",
+    "add_account_mode_column_if_missing",
     # Helpers
     "extract_ticker_info",
     "get_current_stock_price",

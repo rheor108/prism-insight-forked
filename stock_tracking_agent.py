@@ -53,6 +53,7 @@ from tracking import (
     add_scope_column_if_missing,
     add_trigger_columns_if_missing,
     add_sector_column_if_missing,
+    add_account_mode_column_if_missing,
     extract_ticker_info,
     get_current_stock_price,
     get_trading_value_rank_change,
@@ -162,6 +163,7 @@ class StockTrackingAgent:
         add_scope_column_if_missing(self.cursor, self.conn)  # Must run before indexes
         add_trigger_columns_if_missing(self.cursor, self.conn)  # v1.16.5 migration
         add_sector_column_if_missing(self.cursor, self.conn)  # v1.17 migration for AI agent sector queries
+        add_account_mode_column_if_missing(self.cursor, self.conn)  # live-trading demo/real split
         create_indexes(self.cursor, self.conn)
 
     async def _extract_ticker_info(self, report_path: str) -> Tuple[str, str]:
