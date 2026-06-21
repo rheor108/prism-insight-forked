@@ -510,9 +510,15 @@ async def async_initialize_us_database(db_path: Optional[str] = None):
 # Utility Functions
 # =============================================================================
 
-def get_us_holdings_count(cursor) -> int:
-    """Get count of current US holdings."""
-    cursor.execute("SELECT COUNT(*) FROM us_stock_holdings")
+def get_us_holdings_count(cursor, account_mode: str = None) -> int:
+    """Get count of current US holdings, optionally filtered by account_mode."""
+    if account_mode:
+        cursor.execute(
+            "SELECT COUNT(*) FROM us_stock_holdings WHERE account_mode = ?",
+            (account_mode,),
+        )
+    else:
+        cursor.execute("SELECT COUNT(*) FROM us_stock_holdings")
     return cursor.fetchone()[0]
 
 
@@ -529,13 +535,65 @@ def get_us_holding(cursor, ticker: str) -> Optional[dict]:
     return None
 
 
-def is_us_ticker_in_holdings(cursor, ticker: str) -> bool:
-    """Check if a US ticker is in holdings."""
-    cursor.execute(
-        "SELECT COUNT(*) FROM us_stock_holdings WHERE ticker = ?",
-        (ticker,)
-    )
+def is_us_ticker_in_holdings(cursor, ticker: str, account_mode: str = None) -> bool:
+    """
+    Check if a US ticker is in holdings.
+
+    Args:
+        cursor: SQLite cursor
+        ticker: Stock ticker (AAPL, MSFT, etc.)
+        account_mode: Optional filter by account mode (demo/real)
+
+    Returns:
+        bool: True if holding, False otherwise
+    """
+    if account_mode:
+        cursor.execute(
+            "SELECT COUNT(*) FROM us_stock_holdings WHERE ticker = ? AND account_mode = ?",
+            (ticker, account_mode),
+        )
+    else:
+        cursor.execute(
+            "SELECT COUNT(*) FROM us_stock_holdings WHERE ticker = ?",
+            (ticker,)
+        )
     return cursor.fetchone()[0] > 0
+
+
+def count_today_us_buys(cursor, account_mode: str) -> int:
+    """
+    Count today's new US buys for the given mode.
+
+    Sums positions still held today plus same-day buys already sold (in
+    us_trading_history), so the daily cap counts every buy event regardless of
+    whether the position is still open.
+
+    Args:
+        cursor: SQLite cursor
+        account_mode: Account mode filter (demo/real)
+
+    Returns:
+        int: Total count of new buys today
+    """
+    import datetime as _dt
+    today = _dt.datetime.now().strftime("%Y-%m-%d")
+    total = 0
+    try:
+        cursor.execute(
+            "SELECT COUNT(*) FROM us_stock_holdings "
+            "WHERE account_mode = ? AND substr(buy_date,1,10) = ?",
+            (account_mode, today),
+        )
+        total += cursor.fetchone()[0]
+        cursor.execute(
+            "SELECT COUNT(*) FROM us_trading_history "
+            "WHERE account_mode = ? AND substr(buy_date,1,10) = ?",
+            (account_mode, today),
+        )
+        total += cursor.fetchone()[0]
+    except Exception as e:
+        logger.error(f"Error counting today's US buys: {str(e)}")
+    return total
 
 
 if __name__ == "__main__":
