@@ -11,7 +11,7 @@
 
 - `my_app`, `my_sec`: 실전 App Key/Secret
 - `my_acct_stock`: 실전 계좌번호 앞 8자리
-- `buy_sizing_mode: slot_even` (잔고 비율 매수)
+- `buy_sizing_mode`: 잔고 비율 매수를 원하면 `slot_even`으로 설정 (참고: 템플릿 기본값은 `fixed`입니다)
 - `max_daily_buys: 3` (필요 시 조정)
 - ⚠️ `default_mode`는 아직 `demo`로 두세요 (3단계에서 전환)
 

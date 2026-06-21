@@ -8,29 +8,38 @@ journals are preserved (they carry account_mode).
 
 Usage:
     python scripts/reset_holdings_for_live.py --confirm
+    python scripts/reset_holdings_for_live.py --db /custom/path.sqlite --confirm
 """
 import argparse
 import sqlite3
+import sys
 from pathlib import Path
 
 DB = Path(__file__).resolve().parent.parent / "stock_tracking_db.sqlite"
 
 
-def _archive_and_clear(cur, table):
+def _archive_and_clear(cur, table, pre_count):
+    """Archive table contents and clear it. Returns count of archived rows."""
     archive = f"{table}_demo_archive"
     cur.execute(f"CREATE TABLE IF NOT EXISTS {archive} AS SELECT * FROM {table} WHERE 0")
     cur.execute(f"INSERT INTO {archive} SELECT * FROM {table}")
-    moved = cur.rowcount
     cur.execute(f"DELETE FROM {table}")
-    return moved
+    return pre_count
 
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--db", default=str(DB), help="path to SQLite DB")
     ap.add_argument("--confirm", action="store_true", help="actually perform the reset")
     args = ap.parse_args()
 
-    conn = sqlite3.connect(str(DB))
+    # Preflight: ensure DB exists before connecting
+    db_path = Path(args.db)
+    if not db_path.exists():
+        print(f"ERROR: DB not found: {args.db}")
+        sys.exit(1)
+
+    conn = sqlite3.connect(args.db)
     cur = conn.cursor()
     for table in ["stock_holdings", "us_stock_holdings"]:
         try:
@@ -42,7 +51,7 @@ def main():
         if not args.confirm:
             print(f"  {table}: {n} rows would be archived+cleared (dry-run)")
             continue
-        moved = _archive_and_clear(cur, table)
+        moved = _archive_and_clear(cur, table, n)
         conn.commit()
         print(f"  {table}: archived {moved} rows -> {table}_demo_archive, cleared")
     conn.close()
