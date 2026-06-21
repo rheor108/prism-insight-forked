@@ -113,6 +113,7 @@ try:
         add_account_mode_column_to_us_tables,
         is_us_ticker_in_holdings,
         get_us_holdings_count,
+        count_today_us_buys,
     )
     from tracking.journal import USJournalManager
     from tracking.compression import USCompressionManager
@@ -133,6 +134,7 @@ except ImportError as e:
         add_account_mode_column_to_us_tables,
         is_us_ticker_in_holdings,
         get_us_holdings_count,
+        count_today_us_buys,
     )
     from tracking.journal import USJournalManager
     from tracking.compression import USCompressionManager
@@ -537,9 +539,9 @@ class USStockTrackingAgent:
         """Check if stock is already in holdings."""
         return is_us_ticker_in_holdings(self.cursor, ticker)
 
-    async def _get_current_slots_count(self) -> int:
+    async def _get_current_slots_count(self, account_mode: str = None) -> int:
         """Get current number of holdings."""
-        return get_us_holdings_count(self.cursor)
+        return get_us_holdings_count(self.cursor, account_mode)
 
     async def _check_sector_diversity(self, sector: str) -> bool:
         """Check for over-concentration in same sector."""
@@ -843,7 +845,8 @@ class USStockTrackingAgent:
             return {"success": False, "error": str(e)}
 
     async def buy_stock(self, ticker: str, company_name: str, current_price: float,
-                        scenario: Dict[str, Any], rank_change_msg: str = "") -> bool:
+                        scenario: Dict[str, Any], rank_change_msg: str = "",
+                        account_mode: str = "demo") -> bool:
         """
         Process stock purchase.
 
@@ -853,6 +856,7 @@ class USStockTrackingAgent:
             current_price: Current stock price in USD
             scenario: Trading scenario information
             rank_change_msg: Trading value ranking change info
+            account_mode: Trading account mode ("demo" or "real")
 
         Returns:
             bool: Purchase success status
@@ -882,8 +886,8 @@ class USStockTrackingAgent:
                 """
                 INSERT INTO us_stock_holdings
                 (ticker, company_name, buy_price, buy_date, current_price, last_updated,
-                 scenario, target_price, stop_loss, trigger_type, trigger_mode, sector)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 scenario, target_price, stop_loss, trigger_type, trigger_mode, sector, account_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ticker,
@@ -897,7 +901,8 @@ class USStockTrackingAgent:
                     scenario.get('stop_loss', 0),
                     trigger_type,
                     trigger_mode,
-                    scenario.get('sector', 'Unknown')
+                    scenario.get('sector', 'Unknown'),
+                    account_mode,
                 )
             )
             self.conn.commit()
@@ -2053,7 +2058,24 @@ class USStockTrackingAgent:
                         )
                         continue
 
-                    buy_success = await self.buy_stock(ticker, company_name, current_price, scenario, rank_change_msg)
+                    from trading.trading_mode import (
+                        resolve_trading_mode, get_buy_sizing_mode, get_max_daily_buys,
+                    )
+                    from tracking.db_schema import count_today_us_buys
+                    trading_mode = resolve_trading_mode()
+
+                    max_daily = get_max_daily_buys()
+                    if count_today_us_buys(self.cursor, trading_mode) >= max_daily:
+                        logger.warning(
+                            f"Daily buy cap ({max_daily}) reached for "
+                            f"{trading_mode}; skipping {company_name}({ticker})"
+                        )
+                        continue
+
+                    buy_success = await self.buy_stock(
+                        ticker, company_name, current_price, scenario,
+                        rank_change_msg, account_mode=trading_mode,
+                    )
 
                     if buy_success:
                         # Execute actual trading
@@ -2066,10 +2088,18 @@ class USStockTrackingAgent:
                                     from trading.us_stock_trading import AsyncUSTradingContext
                                 except ImportError:
                                     from prism_us.trading.us_stock_trading import AsyncUSTradingContext
-                                async with AsyncUSTradingContext() as trading:
-                                    # Pass limit_price for reserved orders (required for US market)
-                                    # Trading module will use current_price as limit_price for reserved orders
-                                    trade_result = await trading.async_buy_stock(ticker=ticker, limit_price=current_price)
+                                async with AsyncUSTradingContext(mode=trading_mode) as trading:
+                                    buy_amount = None
+                                    if get_buy_sizing_mode() == "slot_even":
+                                        occupied = await self._get_current_slots_count(trading_mode)
+                                        remaining = self.max_slots - occupied
+                                        buy_amount = await asyncio.to_thread(
+                                            trading.calculate_slot_even_amount, remaining
+                                        )
+                                    trade_result = await trading.async_buy_stock(
+                                        ticker=ticker, buy_amount=buy_amount,
+                                        limit_price=current_price,
+                                    )
 
                                 if trade_result['success']:
                                     logger.info(f"Actual purchase successful: {trade_result['message']}")
@@ -2551,6 +2581,16 @@ class USStockTrackingAgent:
 
             # Initialize
             await self.initialize(language)
+
+            from trading.trading_mode import resolve_trading_mode
+            if resolve_trading_mode() == "real":
+                warn = "⚠️ 실전 매매 모드가 활성화되었습니다 (US). 실제 주문이 체결됩니다."
+                logger.warning(warn)
+                if self.telegram_bot and chat_id:
+                    try:
+                        await self.telegram_bot.send_message(chat_id=chat_id, text=warn)
+                    except Exception as e:
+                        logger.warning(f"Live-mode telegram notice failed: {e}")
 
             try:
                 # Process reports
