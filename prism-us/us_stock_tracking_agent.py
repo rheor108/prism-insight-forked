@@ -110,6 +110,7 @@ try:
         add_market_column_to_shared_tables,
         migrate_us_performance_tracker_columns,
         migrate_us_watchlist_history_columns,
+        add_account_mode_column_to_us_tables,
         is_us_ticker_in_holdings,
         get_us_holdings_count,
     )
@@ -129,6 +130,7 @@ except ImportError as e:
         add_market_column_to_shared_tables,
         migrate_us_performance_tracker_columns,
         migrate_us_watchlist_history_columns,
+        add_account_mode_column_to_us_tables,
         is_us_ticker_in_holdings,
         get_us_holdings_count,
     )
@@ -492,6 +494,8 @@ class USStockTrackingAgent:
         migrate_us_performance_tracker_columns(self.cursor, self.conn)
         # Migrate watchlist history columns for 7/14/30-day performance tracking
         migrate_us_watchlist_history_columns(self.cursor, self.conn)
+        # Add account_mode column for demo/real split
+        add_account_mode_column_to_us_tables(self.cursor, self.conn)
 
     def _normalize_decision(self, decision: str) -> str:
         """

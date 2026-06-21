@@ -336,6 +336,25 @@ def migrate_us_performance_tracker_columns(cursor, conn):
         logger.warning(f"Error updating tracking_status: {e}")
 
 
+def add_account_mode_column_to_us_tables(cursor, conn):
+    """
+    Add account_mode column to US trading tables (demo/real split migration).
+
+    Existing rows default to 'demo'. Idempotent.
+    """
+    tables = ["us_stock_holdings", "us_trading_history"]
+    for table in tables:
+        try:
+            cursor.execute(
+                f"ALTER TABLE {table} ADD COLUMN account_mode TEXT DEFAULT 'demo'"
+            )
+            conn.commit()
+            logger.info(f"Added account_mode column to {table}")
+        except Exception as e:
+            if "duplicate column name" not in str(e).lower():
+                logger.warning(f"Migration warning for {table}: {e}")
+
+
 def migrate_us_watchlist_history_columns(cursor, conn):
     """
     Migrate us_watchlist_history table to add new columns for 7/14/30-day tracking.
@@ -420,6 +439,9 @@ def initialize_us_database(db_path: Optional[str] = None):
     # Migrate US watchlist history columns (for existing databases)
     migrate_us_watchlist_history_columns(cursor, conn)
 
+    # Add account_mode column for demo/real split
+    add_account_mode_column_to_us_tables(cursor, conn)
+
     logger.info(f"US database initialized: {db_path}")
 
     return cursor, conn
@@ -465,6 +487,15 @@ async def async_initialize_us_database(db_path: Optional[str] = None):
     for table_name, column_def in MARKET_COLUMN_MIGRATIONS:
         try:
             await conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_def}")
+        except Exception:
+            pass
+
+    # Add account_mode column for demo/real split
+    for table in ["us_stock_holdings", "us_trading_history"]:
+        try:
+            await conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN account_mode TEXT DEFAULT 'demo'"
+            )
         except Exception:
             pass
 
