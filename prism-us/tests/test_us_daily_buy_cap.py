@@ -57,3 +57,29 @@ def test_is_us_ticker_in_holdings_mode_filter(tmp_path):
     assert is_us_ticker_in_holdings(cur, "AAPL", "demo") is False
     assert is_us_ticker_in_holdings(cur, "AAPL") is True
     conn.close()
+
+
+def test_us_history_account_mode_counted_for_correct_mode(tmp_path):
+    """Fix 1 guard: a us_trading_history row with account_mode='real' IS counted
+    by count_today_us_buys(..., 'real') and is NOT counted for 'demo'.
+
+    Validates that sell_stock correctly records account_mode so a same-day
+    buy-then-sell in real mode is not invisible to the daily cap.
+    """
+    conn, cur = _conn(tmp_path)
+    cur.execute(
+        "INSERT INTO us_trading_history "
+        "(ticker, company_name, buy_price, buy_date, sell_price, sell_date, profit_rate, holding_days, account_mode) "
+        "VALUES ('META','Meta',100,?,110,?,10,0,'real')",
+        (TODAY, TODAY),
+    )
+    cur.execute(
+        "INSERT INTO us_trading_history "
+        "(ticker, company_name, buy_price, buy_date, sell_price, sell_date, profit_rate, holding_days, account_mode) "
+        "VALUES ('AMZN','Amazon',200,?,220,?,10,0,'demo')",
+        (TODAY, TODAY),
+    )
+    conn.commit()
+    assert count_today_us_buys(cur, "real") == 1   # META only
+    assert count_today_us_buys(cur, "demo") == 1   # AMZN only
+    conn.close()

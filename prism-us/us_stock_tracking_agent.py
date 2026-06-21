@@ -535,9 +535,9 @@ class USStockTrackingAgent:
         """Calculate trading value ranking change."""
         return await get_trading_value_rank_change(ticker)
 
-    async def _is_ticker_in_holdings(self, ticker: str) -> bool:
+    async def _is_ticker_in_holdings(self, ticker: str, account_mode: str = None) -> bool:
         """Check if stock is already in holdings."""
-        return is_us_ticker_in_holdings(self.cursor, ticker)
+        return is_us_ticker_in_holdings(self.cursor, ticker, account_mode)
 
     async def _get_current_slots_count(self, account_mode: str = None) -> int:
         """Get current number of holdings."""
@@ -862,13 +862,13 @@ class USStockTrackingAgent:
             bool: Purchase success status
         """
         try:
-            # Check if already holding
-            if await self._is_ticker_in_holdings(ticker):
+            # Check if already holding (filtered by account_mode for demo/real isolation)
+            if await self._is_ticker_in_holdings(ticker, account_mode):
                 logger.warning(f"{ticker} ({company_name}) already in holdings")
                 return False
 
-            # Check available slots
-            current_slots = await self._get_current_slots_count()
+            # Check available slots (filtered by account_mode for demo/real isolation)
+            current_slots = await self._get_current_slots_count(account_mode)
             if current_slots >= self.max_slots:
                 logger.warning(f"Holdings already at maximum ({self.max_slots})")
                 return False
@@ -1593,18 +1593,21 @@ class USStockTrackingAgent:
             holding_days = (datetime.now() - buy_datetime).days
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+            # Read account_mode from the holding row before it is deleted
+            account_mode = stock_data.get('account_mode', 'demo')
+
             # Add to trading history
             self.cursor.execute(
                 """
                 INSERT INTO us_trading_history
                 (ticker, company_name, buy_price, buy_date, sell_price, sell_date,
-                 profit_rate, holding_days, scenario, trigger_type, trigger_mode, sector)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 profit_rate, holding_days, scenario, trigger_type, trigger_mode, sector, account_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ticker, company_name, buy_price, buy_date,
                     current_price, now, profit_rate, holding_days,
-                    scenario_json, trigger_type, trigger_mode, sector
+                    scenario_json, trigger_type, trigger_mode, sector, account_mode
                 )
             )
 
@@ -1668,7 +1671,7 @@ class USStockTrackingAgent:
             self.cursor.execute(
                 """SELECT ticker, company_name, buy_price, buy_date, current_price,
                    scenario, target_price, stop_loss, last_updated,
-                   trigger_type, trigger_mode, sector
+                   trigger_type, trigger_mode, sector, account_mode
                    FROM us_stock_holdings"""
             )
             holdings = [dict(row) for row in self.cursor.fetchall()]
@@ -2060,9 +2063,17 @@ class USStockTrackingAgent:
 
                     from trading.trading_mode import (
                         resolve_trading_mode, get_buy_sizing_mode, get_max_daily_buys,
+                        is_emergency_stopped,
                     )
                     from tracking.db_schema import count_today_us_buys
                     trading_mode = resolve_trading_mode()
+
+                    # Kill-switch precheck — avoids ghost holdings when emergency stop is active
+                    if is_emergency_stopped():
+                        logger.warning(
+                            f"Emergency stop active; skipping buy of {company_name}({ticker})"
+                        )
+                        continue
 
                     max_daily = get_max_daily_buys()
                     if count_today_us_buys(self.cursor, trading_mode) >= max_daily:

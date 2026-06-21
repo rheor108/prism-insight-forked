@@ -60,3 +60,31 @@ def test_is_ticker_in_holdings_mode_filter(tmp_path):
     assert is_ticker_in_holdings(cur, "AAA", "demo") is False   # real row excluded by demo filter
     assert is_ticker_in_holdings(cur, "AAA") is True            # no filter = any mode
     conn.close()
+
+
+def test_history_account_mode_counted_for_correct_mode(tmp_path):
+    """Fix 1 guard: a trading_history row with account_mode='real' IS counted by
+    count_today_buys(..., 'real') and is NOT counted for 'demo'.
+
+    This validates that sell_stock correctly records account_mode so that a
+    same-day buy-then-sell in real mode is not invisible to the daily cap.
+    """
+    conn, cur = _conn(tmp_path)
+    # Simulate a real buy that was sold the same day (now lives in trading_history)
+    cur.execute(
+        "INSERT INTO trading_history "
+        "(ticker, company_name, buy_price, buy_date, sell_price, sell_date, profit_rate, holding_days, account_mode) "
+        "VALUES ('EEE','X',100,?,110,?,10,0,'real')",
+        (TODAY, TODAY),
+    )
+    # Also add a demo row with same buy_date — must NOT count toward real cap
+    cur.execute(
+        "INSERT INTO trading_history "
+        "(ticker, company_name, buy_price, buy_date, sell_price, sell_date, profit_rate, holding_days, account_mode) "
+        "VALUES ('FFF','Y',100,?,110,?,10,0,'demo')",
+        (TODAY, TODAY),
+    )
+    conn.commit()
+    assert count_today_buys(cur, "real") == 1   # EEE only
+    assert count_today_buys(cur, "demo") == 1   # FFF only
+    conn.close()
