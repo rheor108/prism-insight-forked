@@ -1494,24 +1494,33 @@ class DomesticStockTrading:
                 output2 = res.getBody().output2[0]  # Account summary
 
                 if output2:
-                    pchs_amt = float(output2.get('pchs_amt_smtl_amt', 0)) or 1  # Replace 0 with 1
+                    # KIS may return None/'' for these fields on an empty account; coerce safely
+                    pchs_amt = float(output2.get('pchs_amt_smtl_amt') or 0) or 1  # Replace 0 with 1
 
                     # Total evaluation amount and securities evaluation amount
-                    tot_evlu_amt = float(output2.get('tot_evlu_amt', 0))
-                    scts_evlu_amt = float(output2.get('scts_evlu_amt', 0))
-                    dnca_tot_amt = float(output2.get('dnca_tot_amt', 0))
+                    tot_evlu_amt = float(output2.get('tot_evlu_amt') or 0)
+                    scts_evlu_amt = float(output2.get('scts_evlu_amt') or 0)
+                    dnca_tot_amt = float(output2.get('dnca_tot_amt') or 0)
+                    evlu_pfls_amt = float(output2.get('evlu_pfls_smtl_amt') or 0)
 
                     # Total cash (including D+2) = Total evaluation amount - Securities evaluation amount
                     # This includes deposit (D+0) + D+1 + D+2 receivables
                     total_cash = tot_evlu_amt - scts_evlu_amt
 
+                    # ord_psbl_cash is None on an empty account → fall back to deposit
+                    # (the full deposit is orderable when nothing is held)
+                    ord_psbl_raw = output2.get('ord_psbl_cash')
+                    available_amount = (float(ord_psbl_raw)
+                                        if ord_psbl_raw not in (None, '')
+                                        else dnca_tot_amt)
+
                     account_summary = {
                         'total_eval_amount': tot_evlu_amt,
-                        'total_profit_amount': float(output2.get('evlu_pfls_smtl_amt', 0)),
-                        'total_profit_rate': round(float(output2.get('evlu_pfls_smtl_amt', 0)) / pchs_amt * 100, 2),
+                        'total_profit_amount': evlu_pfls_amt,
+                        'total_profit_rate': round(evlu_pfls_amt / pchs_amt * 100, 2),
                         'deposit': dnca_tot_amt,  # Deposit (D+0, same-day withdrawal available)
                         'total_cash': total_cash,  # Total cash (including D+2)
-                        'available_amount': float(output2.get('ord_psbl_cash', 0))
+                        'available_amount': available_amount
                     }
 
                     logger.info(f"Account summary: Total eval {account_summary['total_eval_amount']:,.0f} KRW, "
