@@ -34,6 +34,7 @@ PROJECT_ROOT = TRADING_DIR.parent.parent
 import sys
 sys.path.insert(0, str(PROJECT_ROOT / "trading"))
 import kis_auth as ka
+from trading_mode import is_emergency_stopped
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -1062,6 +1063,14 @@ class USStockTrading:
         """Execute buy stock logic"""
         amount = buy_amount if buy_amount else self.buy_amount
 
+        if is_emergency_stopped():
+            logger.warning(f"[Async Buy] {ticker} BLOCKED by EMERGENCY_STOP kill switch")
+            return {
+                'success': False, 'ticker': ticker, 'current_price': 0,
+                'quantity': 0, 'total_amount': 0, 'order_no': None,
+                'message': 'Blocked by emergency stop', 'timestamp': datetime.datetime.now().isoformat()
+            }
+
         result = {
             'success': False,
             'ticker': ticker,
@@ -1177,6 +1186,11 @@ class USStockTrading:
             'message': '',
             'timestamp': datetime.datetime.now().isoformat()
         }
+
+        if is_emergency_stopped():
+            logger.warning(f"[Async Sell] {ticker} BLOCKED by EMERGENCY_STOP kill switch")
+            result['message'] = 'Blocked by emergency stop'
+            return result
 
         stock_lock = await self._get_stock_lock(ticker)
 
