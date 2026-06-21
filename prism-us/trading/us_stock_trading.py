@@ -130,6 +130,18 @@ def get_exchange_code(ticker: str) -> str:
     return "NYSE"
 
 
+def slot_even_amount(available_amount, remaining_slots: int, default_amount) -> int:
+    """Evenly split available USD cash across remaining portfolio slots.
+
+    Pure helper. Returns default_amount when no free slot or no usable cash.
+    """
+    if remaining_slots <= 0:
+        return default_amount
+    if not available_amount or available_amount <= 0:
+        return default_amount
+    return math.floor(available_amount / remaining_slots)
+
+
 class USStockTrading:
     """US Stock Trading class using KIS Overseas Stock API"""
 
@@ -276,6 +288,21 @@ class USStockTrading:
             logger.info(f"[{ticker}] Buyable: {quantity} shares x ${current_price:.2f} = ${total:.2f}")
 
         return quantity
+
+    def calculate_slot_even_amount(self, remaining_slots: int) -> int:
+        """Per-stock USD amount = available USD cash / remaining slots.
+
+        Falls back to the configured fixed USD buy amount on balance
+        inquiry failure.
+        """
+        summary = self.get_account_summary()
+        available = _safe_float(summary.get("available_amount", 0)) if summary else 0.0
+        amount = slot_even_amount(available, remaining_slots, self.buy_amount)
+        logger.info(
+            f"[Slot-even] available ${available:,.2f} / {remaining_slots} slots "
+            f"-> ${amount} per stock"
+        )
+        return amount
 
     def buy_market_price(self, ticker: str, buy_amount: float = None,
                          exchange: str = None) -> Dict[str, Any]:
