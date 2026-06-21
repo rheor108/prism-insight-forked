@@ -2,7 +2,7 @@ import datetime
 import sqlite3
 
 from tracking.db_schema import create_all_tables, add_account_mode_column_if_missing
-from tracking.helpers import get_current_slots_count, count_today_buys
+from tracking.helpers import get_current_slots_count, count_today_buys, is_ticker_in_holdings
 
 TODAY = datetime.datetime.now().strftime("%Y-%m-%d")
 YESTERDAY = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
@@ -49,4 +49,14 @@ def test_count_today_buys_holdings_and_history(tmp_path):
     )
     conn.commit()
     assert count_today_buys(cur, "real") == 2  # AAA (holding) + DDD (history)
+    conn.close()
+
+
+def test_is_ticker_in_holdings_mode_filter(tmp_path):
+    conn, cur = _conn(tmp_path)
+    _add_holding(cur, "AAA", "real", TODAY)
+    conn.commit()
+    assert is_ticker_in_holdings(cur, "AAA", "real") is True
+    assert is_ticker_in_holdings(cur, "AAA", "demo") is False   # real row excluded by demo filter
+    assert is_ticker_in_holdings(cur, "AAA") is True            # no filter = any mode
     conn.close()

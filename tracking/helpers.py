@@ -187,22 +187,29 @@ async def get_trading_value_rank_change(ticker: str, ohlcv_cache: dict = None) -
         return 0, "Trading value ranking analysis failed"
 
 
-def is_ticker_in_holdings(cursor, ticker: str) -> bool:
+def is_ticker_in_holdings(cursor, ticker: str, account_mode: str = None) -> bool:
     """
     Check if stock is already in holdings.
 
     Args:
         cursor: SQLite cursor
         ticker: Stock code
+        account_mode: Optional filter by account mode (demo/real)
 
     Returns:
         bool: True if holding, False otherwise
     """
     try:
-        cursor.execute(
-            "SELECT COUNT(*) FROM stock_holdings WHERE ticker = ?",
-            (ticker,)
-        )
+        if account_mode:
+            cursor.execute(
+                "SELECT COUNT(*) FROM stock_holdings WHERE ticker = ? AND account_mode = ?",
+                (ticker, account_mode),
+            )
+        else:
+            cursor.execute(
+                "SELECT COUNT(*) FROM stock_holdings WHERE ticker = ?",
+                (ticker,)
+            )
         count = cursor.fetchone()[0]
         return count > 0
     except Exception as e:
@@ -233,8 +240,8 @@ def count_today_buys(cursor, account_mode: str) -> int:
     trading_history), so the daily cap counts every buy event regardless of
     whether the position is still open.
     """
-    import datetime as _dt
-    today = _dt.datetime.now().strftime("%Y-%m-%d")
+    import datetime
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
     total = 0
     try:
         cursor.execute(
