@@ -1,4 +1,5 @@
-from trading.domestic_stock_trading import slot_even_amount
+from unittest.mock import MagicMock
+from trading.domestic_stock_trading import slot_even_amount, DomesticStockTrading
 
 
 def test_even_split_no_decay():
@@ -22,3 +23,19 @@ def test_negative_slots_falls_back():
 def test_no_cash_falls_back_to_default():
     assert slot_even_amount(0, 5, 10_000) == 10_000
     assert slot_even_amount(None, 5, 10_000) == 10_000
+
+
+def test_method_falls_back_when_summary_none():
+    trader = MagicMock()
+    trader.get_account_summary.return_value = None
+    trader.buy_amount = 500_000
+    result = DomesticStockTrading.calculate_slot_even_amount(trader, remaining_slots=5)
+    assert result == 500_000
+
+
+def test_method_falls_back_when_summary_empty():
+    trader = MagicMock()
+    trader.get_account_summary.return_value = {}
+    trader.buy_amount = 500_000
+    result = DomesticStockTrading.calculate_slot_even_amount(trader, remaining_slots=5)
+    assert result == 500_000

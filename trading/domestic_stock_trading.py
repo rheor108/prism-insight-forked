@@ -243,7 +243,10 @@ class DomesticStockTrading:
         inquiry fails.
         """
         summary = self.get_account_summary()
-        available = float(summary.get("available_amount", 0)) if summary else 0
+        try:
+            available = float(summary.get("available_amount", 0) or 0) if summary else 0.0
+        except (ValueError, TypeError):
+            available = 0.0
         amount = slot_even_amount(available, remaining_slots, self.buy_amount)
         logger.info(
             f"[Slot-even] available {available:,.0f} KRW / {remaining_slots} slots "
