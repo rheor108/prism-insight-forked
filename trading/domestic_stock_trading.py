@@ -28,6 +28,7 @@ from kis_auth import (
     CredentialMismatchError,
     TokenRequestError
 )
+from trading_mode import is_emergency_stopped
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -1127,6 +1128,14 @@ class DomesticStockTrading:
         # Use class default if buy_amount is None
         amount = buy_amount if buy_amount else self.buy_amount
 
+        if is_emergency_stopped():
+            logger.warning(f"[Async Buy API] {stock_code} BLOCKED by EMERGENCY_STOP kill switch")
+            return {
+                'success': False, 'stock_code': stock_code, 'current_price': 0,
+                'quantity': 0, 'total_amount': 0, 'order_no': None,
+                'message': 'Blocked by emergency stop', 'timestamp': datetime.datetime.now().isoformat()
+            }
+
         result = {
             'success': False,
             'stock_code': stock_code,
@@ -1257,6 +1266,11 @@ class DomesticStockTrading:
             'message': '',
             'timestamp': datetime.datetime.now().isoformat()
         }
+
+        if is_emergency_stopped():
+            logger.warning(f"[Async Sell API] {stock_code} BLOCKED by EMERGENCY_STOP kill switch")
+            result['message'] = 'Blocked by emergency stop'
+            return result
 
         # 3-level protection: per-stock lock + semaphore + global lock
         stock_lock = await self._get_stock_lock(stock_code)
