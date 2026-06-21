@@ -210,15 +210,48 @@ def is_ticker_in_holdings(cursor, ticker: str) -> bool:
         return False
 
 
-def get_current_slots_count(cursor) -> int:
-    """Get current number of holdings."""
+def get_current_slots_count(cursor, account_mode: str = None) -> int:
+    """Get current number of holdings, optionally filtered by account_mode."""
     try:
-        cursor.execute("SELECT COUNT(*) FROM stock_holdings")
-        count = cursor.fetchone()[0]
-        return count
+        if account_mode:
+            cursor.execute(
+                "SELECT COUNT(*) FROM stock_holdings WHERE account_mode = ?",
+                (account_mode,),
+            )
+        else:
+            cursor.execute("SELECT COUNT(*) FROM stock_holdings")
+        return cursor.fetchone()[0]
     except Exception as e:
         logger.error(f"Error querying holdings count: {str(e)}")
         return 0
+
+
+def count_today_buys(cursor, account_mode: str) -> int:
+    """Count today's new buys for the given mode.
+
+    Sums positions still held today plus same-day buys already sold (in
+    trading_history), so the daily cap counts every buy event regardless of
+    whether the position is still open.
+    """
+    import datetime as _dt
+    today = _dt.datetime.now().strftime("%Y-%m-%d")
+    total = 0
+    try:
+        cursor.execute(
+            "SELECT COUNT(*) FROM stock_holdings "
+            "WHERE account_mode = ? AND substr(buy_date,1,10) = ?",
+            (account_mode, today),
+        )
+        total += cursor.fetchone()[0]
+        cursor.execute(
+            "SELECT COUNT(*) FROM trading_history "
+            "WHERE account_mode = ? AND substr(buy_date,1,10) = ?",
+            (account_mode, today),
+        )
+        total += cursor.fetchone()[0]
+    except Exception as e:
+        logger.error(f"Error counting today's buys: {str(e)}")
+    return total
 
 
 def check_sector_diversity(cursor, sector: str, max_same_sector: int, concentration_ratio: float) -> bool:
