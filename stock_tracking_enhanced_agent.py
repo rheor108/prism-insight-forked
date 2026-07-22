@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
 
+import asyncio
 import numpy as np
 from scipy import stats
 from typing import List, Tuple, Dict, Any
@@ -491,15 +492,51 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
 
                 # Process buy if entry decision
                 if decision == "Enter" and buy_score >= min_score and sector_diverse:
-                    # Process buy
-                    buy_success = await self.buy_stock(ticker, company_name, current_price, scenario, rank_change_msg)
+                    from trading.trading_mode import (
+                        resolve_trading_mode, get_buy_sizing_mode, get_max_daily_buys,
+                        is_emergency_stopped,
+                    )
+                    from tracking.helpers import count_today_buys
+                    trading_mode = resolve_trading_mode()
+
+                    # Kill-switch precheck — avoids ghost holdings when emergency stop is active
+                    if is_emergency_stopped():
+                        logger.warning(
+                            f"Emergency stop active; skipping buy of {company_name}({ticker})"
+                        )
+                        continue
+
+                    # Daily buy cap
+                    if count_today_buys(self.cursor, trading_mode) >= get_max_daily_buys():
+                        logger.warning(
+                            f"Daily buy cap ({get_max_daily_buys()}) reached for "
+                            f"{trading_mode}; skipping {company_name}({ticker})"
+                        )
+                        continue
+
+                    # Process buy (record account_mode)
+                    buy_success = await self.buy_stock(
+                        ticker, company_name, current_price, scenario,
+                        rank_change_msg, account_mode=trading_mode,
+                    )
 
                     if buy_success:
                         # Call actual account trading function (async)
                         from trading.domestic_stock_trading import AsyncTradingContext
-                        async with AsyncTradingContext() as trading:
+                        async with AsyncTradingContext(mode=trading_mode) as trading:
+                            # Slot-even sizing (fall back to fixed when configured)
+                            buy_amount = None
+                            if get_buy_sizing_mode() == "slot_even":
+                                occupied = await self._get_current_slots_count(trading_mode)
+                                remaining = self.max_slots - occupied
+                                buy_amount = await asyncio.to_thread(
+                                    trading.calculate_slot_even_amount, remaining
+                                )
                             # Execute async buy with limit price for reserved orders
-                            trade_result = await trading.async_buy_stock(stock_code=ticker, limit_price=current_price)
+                            trade_result = await trading.async_buy_stock(
+                                stock_code=ticker, buy_amount=buy_amount,
+                                limit_price=current_price,
+                            )
 
                         if trade_result['success']:
                             logger.info(f"Actual purchase successful: {trade_result['message']}")
@@ -550,7 +587,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             logger.error(traceback.format_exc())
             return 0, 0
 
-    async def buy_stock(self, ticker: str, company_name: str, current_price: float, scenario: Dict[str, Any], rank_change_msg: str = "") -> bool:
+    async def buy_stock(self, ticker: str, company_name: str, current_price: float, scenario: Dict[str, Any], rank_change_msg: str = "", account_mode: str = "demo") -> bool:
         """
         Stock buy processing (override parent class method)
         """
@@ -566,8 +603,8 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 scenario['stop_loss'] = stop_loss
                 logger.info(f"{ticker} Dynamic stop-loss calculated: {stop_loss:,.0f} KRW")
 
-            # Call parent class's buy_stock method
-            return await super().buy_stock(ticker, company_name, current_price, scenario, rank_change_msg)
+            # Call parent class's buy_stock method (propagate account_mode for demo/real split)
+            return await super().buy_stock(ticker, company_name, current_price, scenario, rank_change_msg, account_mode=account_mode)
 
         except Exception as e:
             logger.error(f"{ticker} Error during purchase processing: {str(e)}")
