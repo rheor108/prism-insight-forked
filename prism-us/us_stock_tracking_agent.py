@@ -62,6 +62,28 @@ sys.path.insert(0, str(_prism_us_dir))
 
 
 # =============================================================================
+# Helper function to import the main project's trading_mode (avoid namespace collision)
+# =============================================================================
+def _import_trading_mode():
+    """
+    Import the main project's trading/trading_mode.py.
+
+    prism-us/trading/ shadows the main project's trading/ package in sys.path,
+    so `from trading.trading_mode import ...` raises ModuleNotFoundError here.
+    Add the main trading/ directory and import it as a top-level module instead
+    (same approach as prism-us/trading/us_stock_trading.py).
+
+    Returns:
+        The trading_mode module (resolve_trading_mode, is_emergency_stopped, ...)
+    """
+    _main_trading_dir = str(PROJECT_ROOT / "trading")
+    if _main_trading_dir not in sys.path:
+        sys.path.append(_main_trading_dir)
+    import trading_mode
+    return trading_mode
+
+
+# =============================================================================
 # Helper function to import modules from main project cores/ (avoid namespace collision)
 # =============================================================================
 def _import_from_main_cores(module_name: str, relative_path: str):
@@ -1754,7 +1776,10 @@ class USStockTrackingAgent:
                                     from trading.us_stock_trading import AsyncUSTradingContext
                                 except ImportError:
                                     from prism_us.trading.us_stock_trading import AsyncUSTradingContext
-                                async with AsyncUSTradingContext() as trading:
+                                # Resolve mode through the dual guard (config default_mode + PRISM_LIVE_TRADING);
+                                # AsyncUSTradingContext's yaml-only default would bypass the env kill switch
+                                trading_mode = _import_trading_mode().resolve_trading_mode()
+                                async with AsyncUSTradingContext(mode=trading_mode) as trading:
                                     # Pass limit_price for reserved orders (required for US market)
                                     # If limit_price is 0, trading module will use MOO (Market On Open)
                                     trade_result = await trading.async_sell_stock(ticker=ticker, limit_price=current_price)
@@ -2061,10 +2086,11 @@ class USStockTrackingAgent:
                         )
                         continue
 
-                    from trading.trading_mode import (
-                        resolve_trading_mode, get_buy_sizing_mode, get_max_daily_buys,
-                        is_emergency_stopped,
-                    )
+                    _tm = _import_trading_mode()
+                    resolve_trading_mode = _tm.resolve_trading_mode
+                    get_buy_sizing_mode = _tm.get_buy_sizing_mode
+                    get_max_daily_buys = _tm.get_max_daily_buys
+                    is_emergency_stopped = _tm.is_emergency_stopped
                     from tracking.db_schema import count_today_us_buys
                     trading_mode = resolve_trading_mode()
 
@@ -2593,8 +2619,7 @@ class USStockTrackingAgent:
             # Initialize
             await self.initialize(language)
 
-            from trading.trading_mode import resolve_trading_mode
-            if resolve_trading_mode() == "real":
+            if _import_trading_mode().resolve_trading_mode() == "real":
                 warn = "⚠️ 실전 매매 모드가 활성화되었습니다 (US). 실제 주문이 체결됩니다."
                 logger.warning(warn)
                 if self.telegram_bot and chat_id:

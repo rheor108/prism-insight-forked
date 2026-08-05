@@ -1107,7 +1107,11 @@ class StockTrackingAgent:
                     if sell_success:
                         # Call actual account trading function (async)
                         from trading.domestic_stock_trading import AsyncTradingContext
-                        async with AsyncTradingContext() as trading:
+                        from trading.trading_mode import resolve_trading_mode
+                        # Resolve mode through the dual guard (config default_mode + PRISM_LIVE_TRADING);
+                        # relying on AsyncTradingContext's yaml-only default would bypass the env kill switch
+                        trading_mode = resolve_trading_mode()
+                        async with AsyncTradingContext(mode=trading_mode) as trading:
                             # Execute async sell with limit price for reserved orders
                             trade_result = await trading.async_sell_stock(stock_code=ticker, limit_price=current_price)
 
